@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'" />
+  <title>Orbit</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" data-icon="logo"></div>
+        <span class="brand-name">Orbit</span>
+      </div>
+      <nav class="pills" id="pills"></nav>
+      <div class="top-actions">
+        <button class="icon-btn" data-action="toggle-feed" title="Kurulum akışı" data-icon="panel"></button>
+        <button class="icon-btn" data-nav="apps" data-focus-search title="Ara" data-icon="search"></button>
+        <button class="icon-btn bell" data-action="toggle-feed" title="Bildirimler" data-icon="bell"><i class="dot" id="bellDot" hidden></i></button>
+        <div class="avatar" id="avatar">O</div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="rail" id="rail"></aside>
+      <main class="content" id="content"></main>
+      <aside class="feed" id="feed">
+        <div class="feed-head">
+          <div>
+            <h3>Kurulum Akışı</h3>
+            <span class="live" id="feedLive"><i></i> Hazır</span>
+          </div>
+          <button class="icon-btn sm" data-action="clear-feed" title="Akışı temizle" data-icon="trash"></button>
+        </div>
+        <div class="feed-list" id="feedList"></div>
+        <div class="feed-chips">
+          <button class="chip" data-nav="drivers"><span data-icon="chip"></span>Sürücüler</button>
+          <button class="chip" data-nav="apps"><span data-icon="package"></span>Programlar</button>
+          <button class="chip" data-nav="assistant"><span data-icon="sparkles"></span>Asistan</button>
+        </div>
+        <form class="composer" id="feedComposer">
+          <input id="feedInput" placeholder="Asistana sor… (örn. oyun için ne kurmalıyım?)" autocomplete="off" />
+          <button class="send" type="submit" data-icon="send" title="Gönder"></button>
+        </form>
+      </aside>
+    </div>
+  </div>
+  <div class="scrim" id="scrim" data-action="close-overlays"></div>
+  <div class="modal-root" id="modalRoot"></div>
+  <div class="toasts" id="toasts"></div>
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+  <script src="lights.js"></script>
+</body>
+</html>
