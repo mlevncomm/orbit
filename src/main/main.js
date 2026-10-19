@@ -73,8 +73,8 @@ function createWindow() {
   const theme = store.get('settings').theme;
   win = new BrowserWindow({
     ...savedBounds(),
-    minWidth: 900,
-    minHeight: 620,
+    minWidth: 480,
+    minHeight: 560,
     backgroundColor: theme === 'dark' ? '#0f0f13' : '#efedf6',
     titleBarStyle: 'hidden',
     titleBarOverlay: OVERLAY[theme] || OVERLAY.light,
@@ -118,7 +118,11 @@ function createWindow() {
   // Geliştirme: ORBIT_SNAPSHOT=dosya.png ile açılıştan birkaç saniye sonra ekran görüntüsü alıp kapanır
   if (process.env.ORBIT_SNAPSHOT) {
     win.webContents.once('did-finish-load', () => setTimeout(async () => {
-      if (process.env.ORBIT_SIZE) win.setSize(...process.env.ORBIT_SIZE.split('x').map(Number));
+      if (process.env.ORBIT_SIZE) {
+        if (win.isMaximized()) win.unmaximize();
+        win.setSize(...process.env.ORBIT_SIZE.split('x').map(Number));
+        await new Promise((r) => setTimeout(r, 600));
+      }
       if (process.env.ORBIT_JS) await win.webContents.executeJavaScript(process.env.ORBIT_JS).catch((e) => console.error('SNAPSHOT js:', e.message));
       if (process.env.ORBIT_PAGE) await win.webContents.executeJavaScript(`navigate(${JSON.stringify(process.env.ORBIT_PAGE)})`).catch((e) => console.error('SNAPSHOT navigate:', e.message));
       await new Promise((r) => setTimeout(r, +(process.env.ORBIT_SETTLE || 1500)));

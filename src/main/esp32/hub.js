@@ -28,7 +28,8 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::ASCII
 $sp = New-Object System.IO.Ports.SerialPort $env:ORBIT_PORT, ([int]$env:ORBIT_BAUD), 'None', 8, 'One'
 $sp.DtrEnable = $false; $sp.RtsEnable = $false; $sp.ReadTimeout = 50; $sp.WriteTimeout = 1000
-try { $sp.Open() } catch { [Console]::Out.WriteLine('E ' + $_.Exception.Message); exit 2 }
+# Hata metinleri Türkçe olabilir; ASCII çıkışta bozulmasın diye UTF-8 base64 gönderilir
+try { $sp.Open() } catch { [Console]::Out.WriteLine('E ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.Exception.Message))); exit 2 }
 # Seri okuma AYRI iş parçacığında: Windows PowerShell 5.1'de Console.In.ReadLineAsync gerçekte
 # eşzamanlı çalışır ve döngüyü bloke eder (yanıtlar ancak bir sonraki yazmada okunuyordu).
 $rs = [runspacefactory]::CreateRunspace(); $rs.Open(); $rs.SessionStateProxy.SetVariable('sp', $sp)
@@ -40,7 +41,7 @@ $reader = [powershell]::Create(); $reader.Runspace = $rs
       $n = $sp.Read($buf, 0, $buf.Length)
       if ($n -gt 0) { [Console]::Out.WriteLine('D ' + [Convert]::ToBase64String($buf, 0, $n)); [Console]::Out.Flush() }
     } catch [System.TimeoutException] { }
-    catch { if ($sp.IsOpen) { [Console]::Out.WriteLine('E ' + $_.Exception.Message); [Console]::Out.Flush() }; break }
+    catch { if ($sp.IsOpen) { [Console]::Out.WriteLine('E ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.Exception.Message))); [Console]::Out.Flush() }; break }
   }
 })
 $job = $reader.BeginInvoke()
@@ -53,7 +54,7 @@ try {
     if ($cmd -eq $null -or $cmd -eq 'Q') { break }
     if ($cmd.StartsWith('W ')) { $b = [Convert]::FromBase64String($cmd.Substring(2)); $sp.Write($b, 0, $b.Length) }
   }
-} catch { [Console]::Out.WriteLine('E ' + $_.Exception.Message) }
+} catch { [Console]::Out.WriteLine('E ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.Exception.Message))) }
 finally { if ($sp.IsOpen) { $sp.Close() }; $reader.Stop(); $rs.Close() }
 `;
 
@@ -142,7 +143,7 @@ class Esp32Hub extends EventEmitter {
           if (line === 'O') { opened = true; clearTimeout(timer); resolve(); }
           else if (line.startsWith('D ')) { this.lastSeen = Date.now(); this.decoder.push(Buffer.from(line.slice(2), 'base64').toString('utf8')); }
           else if (line.startsWith('E ')) {
-            const msg = line.slice(2);
+            const msg = Buffer.from(line.slice(2), 'base64').toString('utf8');
             this.pushLog('err', msg);
             if (!opened) { clearTimeout(timer); reject(new Error(/denied|erişim|access/i.test(msg) ? `${this.port} başka bir program tarafından kullanılıyor (Arduino IDE seri monitörü açık olabilir)` : msg)); }
             // Açıkken okuma hatası (ör. kablo çekildi): köprüyü kapat → 'exit' yeniden bağlanmayı başlatır

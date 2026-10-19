@@ -217,8 +217,13 @@ PAGES.dashboard = () => {
   const total = jobs.length;
   const overall = total ? Math.round(jobs.reduce((s, j) => s + (['done', 'skipped', 'error'].includes(j.status) ? 100 : j.percent || 0), 0) / total) : 0;
   const gpu = sys?.gpus.find((g) => !/basic|microsoft/i.test(g.name)) || sys?.gpus?.[0];
-  const tile = (bg, icon, title, meta, tag) => `<div class="tile" style="background:${bg}"><span class="tile-ic">${I(icon)}</span><div><div class="meta">${h(meta)}</div><b>${h(title)}</b></div><span class="tag">${tag}</span></div>`;
-  const ctl = (key, icon, label) => `<button class="ctl ${S.opts[key] ? '' : 'off'}" data-opt="${key}" ${S.running ? 'disabled' : ''}>${I(icon)}<span>${label}</span></button>`;
+  const tile = (bg, art, title, meta, tag) => `<div class="tile has-art" style="background:${bg}"><span class="tag">${tag}</span><div class="tile-art">${ART[art]()}</div><div class="tile-label"><div class="meta">${h(meta)}</div><b>${h(title)}</b></div></div>`;
+  const orbiters = [
+    { icon: 'chip', color: '#7b5cff' }, { icon: 'package', color: '#ff5f8f' },
+    { icon: 'gpu', color: '#ff8a3d' }, { icon: 'code', color: '#2f80ff' }, { icon: 'light', color: '#f5b300' },
+    { icon: 'usb', color: '#16a37f' }, { icon: 'sparkles', color: '#b04cff' }, { icon: 'download', color: '#111114' }, { icon: 'windows', color: '#0078d4' },
+  ];
+  const ctl = (key, icon, label) => `<button class="ctl ${S.opts[key] ? '' : 'off'}" data-opt="${key}" title="${label}" ${S.running ? 'disabled' : ''}>${I(icon)}<span>${label}</span></button>`;
   const waveBars = Array.from({ length: 44 }, (_, i) => `<i style="height:${8 + Math.round(Math.abs(Math.sin(i * 1.7) * 22))}px;animation-delay:${(i % 8) * 0.08}s"></i>`).join('');
 
   const summary = S.running
@@ -242,6 +247,7 @@ PAGES.dashboard = () => {
         ${tile('var(--sky)', 'board', sys ? boardName(sys) : 'Algılanıyor…', sys ? `${sys.ramGB} GB RAM · BIOS ${sys.bios.version}` : '', 'Anakart')}
       </div>
       <div class="hero">
+        <div class="hero-art">${ART.scene(orbiters)}</div>
         <div style="position:relative;z-index:1">
           <h2>Bilgisayarını tek tıkla hazırla</h2>
           <p>Ninite gibi ama sana özel: donanımına uygun güncel sürücüler, geliştirici araçların ve günlük programların, hepsi sessiz kurulum.</p>
@@ -293,7 +299,8 @@ function invSummary() {
 
 PAGES.drivers = () => {
   const sys = S.sys;
-  const hw = (bg, icon, label, title, meta) => `<div class="hw" style="background:${bg}"><span class="ic">${I(icon)}</span><small>${label}</small><b>${h(title)}</b><small>${h(meta || '')}</small></div>`;
+  const ARTS = { cpu: 'cpu', gpu: 'gpu', board: 'board', windows: 'system' };
+  const hw = (bg, icon, label, title, meta) => `<div class="hw has-art" style="background:${bg}"><div class="hw-art">${ART[ARTS[icon]]()}</div><span class="ic">${I(icon)}</span><small>${label}</small><b>${h(title)}</b><small>${h(meta || '')}</small></div>`;
   const gpus = sys?.gpus || [];
   const drv = S.drivers;
   const gpuDrv = drv?.find((d) => d.cls === 'DISPLAY' && !d.generic);
@@ -475,7 +482,8 @@ PAGES.assistant = () => {
     ${ready ? '' : `<div class="banner">${I('sparkles')}<p>Asistanı kullanmak için Ayarlar'dan Claude API anahtarı ekleyin veya yerel model (Ollama) seçin.</p><button class="btn primary sm" data-nav="settings">Ayarlara git</button></div>`}
     <div class="card chat">
       <div class="chat-list" id="chatList">
-        ${msgs || `<div class="msg"><span class="av">${I('sparkles', 16)}</span><div class="bubble"><div class="who"><span>Orbit</span></div>Merhaba! Donanımını okuyabilir, sürücü güncellemelerini tarayabilir ve senin onayınla program kurabilirim. Ne yapalım?</div></div>`}
+        ${msgs ? '' : `<div class="chat-hero">${ART.orb()}<h2>Bugün ne yapalım?</h2><p class="sub">Donanımını okuyabilir, sürücüleri tarayabilir ve senin onayınla program kurabilirim.</p></div>`}
+        ${msgs}
         ${S.thinking ? `<div class="msg"><span class="av">${I('sparkles', 16)}</span><div class="bubble"><span class="spinner"></span></div></div>` : ''}
       </div>
       <div class="suggest">
