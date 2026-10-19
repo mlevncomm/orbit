@@ -83,3 +83,13 @@ Hard resetting via RTS pin...`;
   });
   assert.equal(parseEsptool('A fatal error occurred: Failed to connect').chip, null);
 });
+
+test('pickAutoPort: son port, tek ESP32 köprüsü, belirsiz durum', () => {
+  const { pickAutoPort } = require('../../src/main/esp32/hub');
+  const ports = [{ port: 'COM1', likelyEsp: false }, { port: 'COM3', likelyEsp: true }];
+  assert.equal(pickAutoPort(ports, 'COM3'), 'COM3');
+  assert.equal(pickAutoPort(ports, 'COM7'), null); // son port takılı değil → başkasına atlama
+  assert.equal(pickAutoPort(ports, null), 'COM3');
+  assert.equal(pickAutoPort([...ports, { port: 'COM5', likelyEsp: true }], null), null); // iki kart → bekle
+  assert.equal(pickAutoPort([{ port: 'COM1', likelyEsp: false }], null), null);
+});

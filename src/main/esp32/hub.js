@@ -320,4 +320,14 @@ function identifyWithEsptool(port) {
   });
 }
 
-module.exports = { Esp32Hub, BRIDGES, ALLOWED_COMMANDS, SECRET_KEYS, redact, BRIDGE_PS, parseEsptool, identifyWithEsptool };
+/**
+ * Otomatik bağlanılacak portu seçer. Son kullanılan port takılıysa o; hiç bağlanılmamışsa
+ * yalnızca TEK bir bilinen ESP32 USB köprüsü (CH340, CP210x…) takılıysa o. Belirsizse null.
+ */
+function pickAutoPort(ports, lastPort) {
+  if (lastPort) return ports.some((p) => p.port === lastPort) ? lastPort : null;
+  const esp = ports.filter((p) => p.likelyEsp);
+  return esp.length === 1 ? esp[0].port : null;
+}
+
+module.exports = { Esp32Hub, pickAutoPort, BRIDGES, ALLOWED_COMMANDS, SECRET_KEYS, redact, BRIDGE_PS, parseEsptool, identifyWithEsptool };

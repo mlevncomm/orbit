@@ -14,7 +14,7 @@ const rgb = require('./services/rgb');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
 const bootstrap = require('./services/bootstrap');
-const { Esp32Hub, identifyWithEsptool } = require('./esp32/hub');
+const { Esp32Hub, identifyWithEsptool, pickAutoPort } = require('./esp32/hub');
 const esp32 = new Esp32Hub({ log });
 const { Automation } = require('./automation');
 const { Bridge } = require('./bridge');
@@ -26,13 +26,13 @@ let esp32AutoBusy = false;
 /** Son kullanılan porta kendiliğinden bağlanır (açılışta ve kart sonradan takılınca) */
 async function autoConnectEsp32() {
   const s = store.get('settings');
-  if (esp32AutoBusy || esp32UserDisconnected || s.esp32AutoConnect === false || !s.esp32LastPort || esp32.proc || esp32.state !== 'disconnected') return;
+  if (esp32AutoBusy || esp32UserDisconnected || s.esp32AutoConnect === false || esp32.proc || esp32.state !== 'disconnected') return;
   esp32AutoBusy = true;
   try {
-    const ports = await esp32.listPorts();
-    if (ports.some((p) => p.port === s.esp32LastPort)) {
-      await esp32.connect(s.esp32LastPort, 115200);
-      log.info(`ESP32 otomatik bağlandı: ${s.esp32LastPort}`);
+    const port = pickAutoPort(await esp32.listPorts(), s.esp32LastPort);
+    if (port) {
+      await esp32.connect(port, 115200);
+      log.info(`ESP32 otomatik bağlandı: ${port}${s.esp32LastPort ? '' : ' (ilk kez, tek ESP32 köprüsü bulundu)'}`);
     }
   } catch (e) {
     if (autoConnectEsp32.lastError !== e.message) log.warn('ESP32 otomatik bağlanamadı', e);
