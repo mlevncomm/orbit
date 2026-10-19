@@ -7,6 +7,8 @@ const E = {
   port: null,
   devStatus: null,
   lastPing: null,
+  boards: {},
+  identifying: false,
 };
 const BAUDS = [115200, 74880, 9600, 57600, 230400, 460800, 921600];
 const STATE_TEXT = { disconnected: 'Bağlı değil', connecting: 'Bağlanıyor…', connected: 'Bağlı', reconnecting: 'Yeniden bağlanıyor…' };
@@ -29,11 +31,12 @@ PAGES.esp32 = () => {
   const connected = st.state === 'connected';
   const port = (E.ports || []).find((p) => p.port === (st.port || E.port));
   const caps = dev?.caps || [];
+  const board = E.boards[(st.port || E.port || '').toUpperCase()];
   const portList = E.ports === null
     ? '<div class="empty small"><span class="spinner"></span><p>Portlar taranıyor…</p></div>'
     : !E.ports.length ? `<div class="empty small">${I('usb', 26)}<p>Bilgisayara bağlı seri port yok. Kartı USB veri kablosuyla tak (bazı kablolar yalnızca şarj eder).</p></div>`
     : E.ports.map((p) => `<label class="port ${E.port === p.port ? 'sel' : ''}"><input type="radio" name="espPort" value="${h(p.port)}" ${E.port === p.port ? 'checked' : ''}>
-        <span class="port-ic">${I('usb', 18)}</span><span><b>${h(p.port)}</b> · ${h(p.bridge || 'Bilinmeyen köprü')}<small>${h(p.guess || p.name)}</small><small class="mono">VID ${h(p.vid || '?')} · PID ${h(p.pid || '?')} · ${h(p.status || '')}</small></span></label>`).join('');
+        <span class="port-ic">${I('usb', 18)}</span><span><b>${h(p.port)}</b> · ${h(p.bridge || 'Bilinmeyen köprü')}<small>${E.boards[p.port]?.chip ? `${h(E.boards[p.port].chip)} · ${h(E.boards[p.port].flashSize || '')} (esptool ile doğrulandı)` : h(p.guess || p.name)}</small><small class="mono">VID ${h(p.vid || '?')} · PID ${h(p.pid || '?')} · ${h(p.status || '')}</small></span></label>`).join('');
 
   const firmwareBox = connected && !dev
     ? `<div class="note warnbox">${I('alert', 14)}<div><b>Kartta Orbit firmware yok (ya da baud hızı farklı).</b> Bağlantı ham seri konsol olarak çalışıyor: kartın yazdıklarını görebilir, satır gönderebilirsin.
@@ -62,7 +65,13 @@ PAGES.esp32 = () => {
             <span>Flash</span><b>${dev.flash ? Math.round(dev.flash / 1048576) + ' MB' : '?'}</b>
             <span>MAC</span><b class="mono">${h(dev.mac || '?')}</b>
             <span>Yetenekler</span><b>${caps.map((c) => `<span class="badge">${h(c)}</span>`).join(' ') || '-'}</b>
-          </div>` : `<div class="kv"><span>Durum</span><b>${connected ? 'Orbit firmware yanıt vermiyor' : 'Bağlı değil'}</b><span>Model</span><b>${h(port?.guess || 'bilinmiyor')}</b></div>`}
+          </div>` : `<div class="kv"><span>Durum</span><b>${connected ? 'Orbit firmware yanıt vermiyor' : 'Bağlı değil'}</b>
+            ${board ? `<span>Çip</span><b>${h(board.chip)}${board.revision ? ' (rev ' + h(board.revision) + ')' : ''} <span class="badge">esptool ile doğrulandı</span></b>
+              <span>Özellikler</span><b>${h(board.features || '-')}</b><span>Flash</span><b>${h(board.flashSize || '?')} · kristal ${h(board.crystal || '?')}</b>
+              <span>MAC</span><b class="mono">${h(board.mac || '?')}</b><span>Tanımlandı</span><b>${new Date(board.at).toLocaleString('tr-TR')}</b>`
+            : `<span>Model</span><b>${h(port?.guess || 'bilinmiyor')}</b>`}</div>`}
+        <div class="row"><button class="btn sm" data-esp="identify" ${!(st.port || E.port) || E.identifying ? 'disabled' : ''}>${E.identifying ? '<span class="spinner"></span>' : I('search')}${board ? 'Çipi yeniden tanımla' : 'Çipi esptool ile tanımla'}</button>
+          <span class="sub">Salt okunur: kart kısa süre yeniden başlar, flash'a yazılmaz.</span></div>
         ${firmwareBox}
         <details class="fw-help"><summary>Firmware nasıl yüklenir?</summary>
           <ol><li>Karttaki mevcut programı yedekle: <code>esptool --port ${h(st.port || E.port || 'COM3')} read_flash 0 ALL yedek.bin</code></li>
@@ -117,6 +126,15 @@ document.addEventListener('click', async (e) => {
     case 'disconnect': E.status = await safe(() => api.esp32.disconnect()) || E.status; E.devStatus = null; E.lastPing = null; return renderPage();
     case 'ping': { const r = await safe(() => api.esp32.command('ping'), 'Ping başarısız'); if (r) { E.lastPing = r; renderPage(); } return; }
     case 'status': { const r = await safe(() => api.esp32.readStatus(), 'Durum okunamadı'); if (r) { E.devStatus = r; renderPage(); } return; }
+    case 'identify': {
+      const p = E.status.port || E.port;
+      if (!confirm(`${p} üzerindeki kart esptool ile tanımlanacak. Kart birkaç saniyeliğine önyükleme moduna alınıp yeniden başlatılır; içindeki program silinmez. Devam edilsin mi?`)) return;
+      E.identifying = true; renderPage();
+      const info = await safe(() => api.esp32.identify(p), 'Tanımlanamadı');
+      E.identifying = false;
+      if (info) { E.boards[info.port] = info; E.status = await api.esp32.status(); toast(`${info.chip} · ${info.flashSize || ''}`); }
+      return renderPage();
+    }
     case 'led-on': return safe(() => api.esp32.command('led', { state: 'on' }), 'LED');
     case 'led-off': return safe(() => api.esp32.command('led', { state: 'off' }), 'LED');
     case 'led-blink': return safe(() => api.esp32.command('led', { state: 'blink', ms: 3000 }), 'LED');
@@ -131,3 +149,4 @@ api.esp32.onLog((l) => {
   if (c) { c.innerHTML = espLogHtml(); c.scrollTop = c.scrollHeight; }
 });
 api.esp32.status().then((st) => { E.status = st; }).catch(() => {});
+api.esp32.boards().then((b) => { E.boards = b || {}; }).catch(() => {});

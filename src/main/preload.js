@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('orbit', {
     disconnect: () => call('esp32:disconnect'),
     command: (cmd, args) => call('esp32:command', cmd, args),
     readStatus: () => call('esp32:read-status'),
+    boards: () => call('esp32:boards'),
+    identify: (port) => call('esp32:identify', port),
     raw: (text) => call('esp32:raw', text),
     onStatus: on('esp32:status'),
     onLog: on('esp32:log'),

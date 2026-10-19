@@ -14,7 +14,7 @@ const rgb = require('./services/rgb');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
 const bootstrap = require('./services/bootstrap');
-const { Esp32Hub } = require('./esp32/hub');
+const { Esp32Hub, identifyWithEsptool } = require('./esp32/hub');
 const esp32 = new Esp32Hub({ log });
 const { runPS } = require('./services/ps');
 
@@ -211,6 +211,15 @@ handle('esp32:connect', (port, baud) => esp32.connect(port, baud));
 handle('esp32:disconnect', () => esp32.disconnect());
 handle('esp32:command', (cmd, args) => esp32.command(cmd, args));
 handle('esp32:read-status', () => esp32.readStatus());
+handle('esp32:boards', () => store.get('esp32Boards') || {});
+handle('esp32:identify', async (port) => {
+  // Port Orbit'te açıksa esptool erişemez: önce bağlantıyı kapat
+  if (esp32.proc && esp32.port === String(port).toUpperCase()) esp32.disconnect();
+  const info = await identifyWithEsptool(port);
+  store.patch('esp32Boards', { [info.port]: info });
+  log.info(`ESP32 tanımlandı: ${info.port} ${info.chip} rev ${info.revision} flash ${info.flashSize}`);
+  return info;
+});
 handle('esp32:raw', (text) => {
   // Kullanıcının seri konsoldan yazdığı satır: yalnızca karta gider, bilgisayarda hiçbir şey çalıştırmaz
   const line = String(text || '').replace(/[\r\n]/g, '').slice(0, 256);

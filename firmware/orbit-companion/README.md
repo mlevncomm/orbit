@@ -5,8 +5,11 @@ ESP32 kartının Orbit ile konuşmasını sağlayan firmware. Protokol: JSON Lin
 ## Durum
 
 - Kaynak kod hazır. **Bu bilgisayarda henüz derlenmedi ve karta yüklenmedi.**
-- COM3'teki kartın köprüsü **WCH CH340**. Bu köprü kartın modelini söylemez; çip, yükleme öncesinde `esptool chip_id` ile doğrulanmalı.
-- Kart ESP8266 çıkarsa bu firmware çalışmaz (`ESP.getChipModel()` vb. ESP32'ye özeldir).
+- COM3'teki kart esptool v5.6 ile doğrulandı (2026-10-19, salt okunur):
+  **ESP32-D0WDQ6 rev v1.1**, çift çekirdek 240 MHz, Wi-Fi + BT, kristal 40 MHz, **4 MB flash**, USB köprüsü WCH CH340.
+  Bu firmware bu çiple uyumlu (FQBN: `esp32:esp32:esp32`).
+- Kartta şu an **başka bir program yüklü** (0x10000'de geçerli uygulama görüntüsü, magic 0xE9). Yükleme onu siler: önce yedek al.
+- Dahili LED pini doğrulanmadı. DevKit V1 tipi kartlarda genellikle GPIO2'dir; emin değilsen `ORBIT_LED_PIN` tanımlama (firmware LED'i bildirmez).
 
 ## Yüklemeden önce
 

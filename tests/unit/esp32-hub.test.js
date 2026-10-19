@@ -57,3 +57,29 @@ test('ham satırlar günlüğe düşer', () => {
   hub.onLine('rst:0x1 (POWERON_RESET),boot:0x13');
   assert.equal(hub.logs.at(-1).dir, 'in');
 });
+
+test('parseEsptool: bu bilgisayardaki kartın gerçek esptool v5.6 çıktısı', () => {
+  const { parseEsptool } = require('../../src/main/esp32/hub');
+  const out = `esptool v5.6.0
+Serial port COM3:
+Connecting..........
+Detecting chip type... ESP32
+Connected to ESP32 on COM3:
+Chip type:          ESP32-D0WDQ6 (revision v1.1)
+Features:           Wi-Fi, BT, Dual Core + LP Core, 240MHz, Vref calibration in eFuse, Coding Scheme None
+Crystal frequency:  40MHz
+MAC:                a0:dd:6c:a3:69:34
+
+Flash Memory Information:
+=========================
+Manufacturer: 68
+Device: 4016
+Detected flash size: 4MB
+Hard resetting via RTS pin...`;
+  assert.deepEqual(parseEsptool(out), {
+    chip: 'ESP32-D0WDQ6', revision: 'v1.1', family: 'ESP32',
+    features: 'Wi-Fi, BT, Dual Core + LP Core, 240MHz, Vref calibration in eFuse, Coding Scheme None',
+    crystal: '40MHz', mac: 'a0:dd:6c:a3:69:34', flashSize: '4MB',
+  });
+  assert.equal(parseEsptool('A fatal error occurred: Failed to connect').chip, null);
+});

@@ -253,4 +253,47 @@ class Esp32Hub extends EventEmitter {
   }
 }
 
-module.exports = { Esp32Hub, BRIDGES, ALLOWED_COMMANDS, BRIDGE_PS };
+/**
+ * esptool çıktısını ayrıştırır (esptool v4/v5, `flash-id` / `chip-id`).
+ * Dönüş: { chip, revision, features, crystal, mac, flashSize } — bulunamayan alanlar null
+ */
+function parseEsptool(text) {
+  const get = (re) => (String(text).match(re) || [])[1]?.trim() || null;
+  const chipLine = get(/Chip (?:type|is):\s*(.+)/i);
+  const m = chipLine && chipLine.match(/^(.*?)\s*\(revision (v?[\d.]+)\)/i);
+  return {
+    chip: m ? m[1] : chipLine,
+    revision: m ? m[2] : null,
+    family: get(/Detecting chip type\.*\s*(ESP\S+)/i) || get(/Connected to (ESP\S+)/i),
+    features: get(/Features:\s*(.+)/i),
+    crystal: get(/Crystal (?:frequency|is):\s*(\S+)/i),
+    mac: get(/MAC:\s*([0-9a-f:]{17})/i),
+    flashSize: get(/Detected flash size:\s*(\S+)/i),
+  };
+}
+
+/**
+ * Çipi esptool ile SALT OKUNUR tanımlar (`flash-id`): kart kısa süre önyükleme moduna alınıp
+ * yeniden başlatılır; flash belleğe yazılmaz. esptool kurulu değilse anlaşılır hata verir.
+ */
+function identifyWithEsptool(port) {
+  if (!/^COM\d+$/i.test(port)) return Promise.reject(new Error('Geçersiz port'));
+  return new Promise((resolve, reject) => {
+    const p = spawn('py', ['-3', '-m', 'esptool', '--port', port.toUpperCase(), 'flash-id'], { windowsHide: true });
+    let out = '';
+    const t = setTimeout(() => { try { p.kill(); } catch {} reject(new Error('esptool zaman aşımı (kart önyükleme moduna girmedi; BOOT tuşuna basılı tutarak tekrar dene)')); }, 60000);
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (out += d));
+    p.on('error', () => { clearTimeout(t); reject(new Error('Python bulunamadı (py)')); });
+    p.on('close', (code) => {
+      clearTimeout(t);
+      if (/No module named esptool/i.test(out)) return reject(new Error('esptool kurulu değil: py -3 -m pip install --user esptool'));
+      if (code !== 0) return reject(new Error((out.split(/\r?\n/).filter((l) => /error|fatal|could not/i.test(l))[0] || `esptool başarısız (kod ${code})`).trim()));
+      const info = parseEsptool(out);
+      if (!info.chip) return reject(new Error('esptool çıktısında çip bilgisi bulunamadı'));
+      resolve({ ...info, port: port.toUpperCase(), at: Date.now() });
+    });
+  });
+}
+
+module.exports = { Esp32Hub, BRIDGES, ALLOWED_COMMANDS, BRIDGE_PS, parseEsptool, identifyWithEsptool };
