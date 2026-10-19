@@ -9,6 +9,8 @@ if (-not $Notes) { $Notes = "Orbit $ver" }
 
 Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
 npx electron-builder --win --publish never
+# makensis zaman zaman antivirüs kilidi yüzünden geçici olarak düşüyor: bir kez yeniden dene
+if ($LASTEXITCODE -ne 0) { Start-Sleep 5; npx electron-builder --win --publish never }
 if ($LASTEXITCODE -ne 0) { throw "Derleme başarısız" }
 
 # electron-builder'ın eşzamanlı yayınlama yarışını önlemek için yüklemeyi gh ile yapıyoruz
