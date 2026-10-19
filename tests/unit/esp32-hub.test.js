@@ -38,7 +38,7 @@ test('komut izin listesi: yalnızca tanımlı komutlar', async () => {
   const r = await hub.command('ping');
   assert.equal(r.ok, true);
   assert.ok(r.rttMs >= 0);
-  assert.deepEqual([...ALLOWED_COMMANDS].sort(), ['info', 'led', 'notify', 'ping']);
+  assert.deepEqual([...ALLOWED_COMMANDS].sort(), ['info', 'led', 'notify', 'ping', 'result', 'wifi', 'wifi_off']);
 });
 
 test('ERROR yanıtı reddedilir, karttan gelen EVENT komuta dönüşmez', async () => {

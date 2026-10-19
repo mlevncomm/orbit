@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('orbit', {
     relaunchAdmin: () => call('system:relaunchAdmin'),
     restart: () => call('system:restart'),
     open: (url) => call('shell:open', url),
+    openLocal: (url) => call('shell:open-local', url),
   },
   catalog: {
     get: () => call('catalog:get'),
@@ -42,7 +43,19 @@ contextBridge.exposeInMainWorld('orbit', {
     raw: (text) => call('esp32:raw', text),
     onStatus: on('esp32:status'),
     onLog: on('esp32:log'),
+    wifi: () => call('esp32:wifi'),
+    wifiSetup: (ssid, pass) => call('esp32:wifi-setup', ssid, pass),
+    wifiOff: () => call('esp32:wifi-off'),
+    onWifi: on('esp32:wifi'),
   },
+  automation: {
+    actions: () => call('automation:actions'),
+    history: () => call('automation:history'),
+    run: (action, arg) => call('automation:run', action, arg),
+    onHistory: on('automation:history'),
+    onDrivers: on('automation:drivers'),
+  },
+  onSettingsChanged: on('settings:changed'),
   inventory: { get: (force) => call('inventory:get', force), onChanged: on('inventory:changed') },
   install: {
     run: (items) => call('install:run', items),

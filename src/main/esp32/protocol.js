@@ -5,12 +5,13 @@
 // Alanlar:
 //   v  : protokol sürümü (zorunlu, şu an 1)
 //   id : istek kimliği (PC'nin başlattığı isteklerde zorunlu; yanıt aynı id ile döner)
-//   t  : HELLO | CAPABILITIES | STATUS | HEARTBEAT | COMMAND | RESPONSE | ERROR | EVENT | LOG
+//   t  : HELLO | CAPABILITIES | STATUS | HEARTBEAT | STATE | COMMAND | RESPONSE | ERROR | EVENT | LOG
+//        STATE: PC → kart, Orbit'in anlık durumu (ikiz); yanıt beklenmez
 //   c  : (isteğe bağlı) bütünlük kontrolü — "c" alanı hariç satırın CRC-32 değeri (8 hex)
 // Satır olmayan ya da JSON olmayan çıktı (açılış mesajları, Serial.print) "ham günlük" sayılır.
 
 const VERSION = 1;
-const TYPES = new Set(['HELLO', 'CAPABILITIES', 'STATUS', 'HEARTBEAT', 'COMMAND', 'RESPONSE', 'ERROR', 'EVENT', 'LOG']);
+const TYPES = new Set(['HELLO', 'CAPABILITIES', 'STATUS', 'HEARTBEAT', 'STATE', 'COMMAND', 'RESPONSE', 'ERROR', 'EVENT', 'LOG']);
 const MAX_LINE = 4096;
 
 let table = null;

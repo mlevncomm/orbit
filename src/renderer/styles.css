@@ -654,3 +654,8 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
 .fw-head { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); font-size: 12.5px; font-weight: 600; }
 .fw-row { opacity: .85; }
 :root[data-theme="dark"] .cmp.vendor, :root[data-theme="dark"] .cmp.newer { color: #9fe3c4; }
+
+/* ---------- 1.6: ESP32 ikiz ---------- */
+.acts { padding-left: 0; list-style: none; display: grid; gap: 6px; font-size: 12.5px; }
+.panel-url { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.panel-url .mono { flex: 1; min-width: 160px; }

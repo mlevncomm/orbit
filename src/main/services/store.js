@@ -22,6 +22,12 @@ const DEFAULTS = {
     minimizeToTray: true,
     startWithWindows: true,  // RGB görünümünün açılışta geri gelmesi için varsayılan açık
     rgbEngine: 'hardware',   // 'hardware' (cihazın kendi efekti) | 'sync' (yazılım senkron)
+    esp32LedAuto: true,      // ESP32 LED'i bilgisayarın durumunu yansıtsın
+    esp32Buttons: {          // BOOT tuşu → izinli eylem
+      short: { action: 'lights.power', arg: 'toggle' },
+      long: { action: 'lights.next', arg: '' },
+    },
+    esp32Token: null,        // Wi-Fi paneli gizli anahtarı (Wi-Fi şifresi Orbit'te SAKLANMAZ)
   },
   ui: {                     // arayüz durumu (sayfa, filtreler, Panel seçenekleri…)
     page: 'dashboard',

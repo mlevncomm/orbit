@@ -16,6 +16,8 @@ const inventory = require('./services/inventory');
 const bootstrap = require('./services/bootstrap');
 const { Esp32Hub, identifyWithEsptool } = require('./esp32/hub');
 const esp32 = new Esp32Hub({ log });
+const { Automation } = require('./automation');
+let automation = null;
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -139,6 +141,8 @@ handle('system:relaunchAdmin', async () => {
 });
 handle('system:restart', () => runPS('shutdown /r /t 15 /c "Orbit: kurulum tamamlandı, bilgisayar yeniden başlatılıyor."'));
 handle('shell:open', (url) => { if (/^https:\/\//.test(url)) return shell.openExternal(url); throw new Error('Geçersiz bağlantı'); });
+// Yalnızca yerel ağdaki ESP32 paneli (http://192.168.x.x / 10.x / 172.16-31.x) açılabilir
+handle('shell:open-local', (url) => { if (/^http:\/\/(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))[\d.]*\/\?t=[0-9a-f]+$/.test(url)) return shell.openExternal(url); throw new Error('Geçersiz yerel adres'); });
 handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, logs: log.dir(), electron: process.versions.electron }));
 handle('app:openLogs', () => shell.openPath(log.dir()));
 ipcMain.on('app:log', (_e, level, msg) => (level === 'error' ? log.error('[arayüz] ' + msg) : log.info('[arayüz] ' + msg)));
@@ -226,12 +230,39 @@ handle('esp32:raw', (text) => {
   esp32.writeRaw(line + '\n'); esp32.pushLog('out', line); return true;
 });
 esp32.on('status', (s) => send('esp32:status', s));
+
+// ---------- Otomasyon / ESP32 ikizi ----------
+handle('automation:actions', () => automation.catalog());
+handle('automation:history', () => automation.history);
+handle('automation:run', (action, arg) => automation.run(action, arg, { source: 'ui' }));
+handle('esp32:wifi', () => ({ wifi: automation.wifi || null, url: automation.panelUrl() }));
+handle('esp32:wifi-setup', async (ssid, pass) => { await automation.setupWifi(ssid, pass); return { wifi: automation.wifi || null }; });
+handle('esp32:wifi-off', async () => { await automation.disableWifi(); return true; });
+function startAutomation() {
+  automation = new Automation({
+    rgb, store, installer, inventory, catalog, drivers, assistant, hub: esp32, log, version: app.getVersion(),
+    showWindow, setSettings,
+    confirm: async (message, detail) => {
+      const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+        type: 'question', title: 'Orbit · ESP32 isteği', message, detail, buttons: ['Onayla', 'Reddet'], defaultId: 1, cancelId: 1, noLink: true,
+      });
+      return r.response === 0;
+    },
+  });
+  esp32.on('device-event', (ev) => automation.onDeviceEvent(ev).catch((e) => log.warn('ESP32 olayı', e)));
+  esp32.on('connected', () => automation.onConnected().catch(() => {}));
+  automation.on('history', (h) => send('automation:history', h));
+  automation.on('wifi', () => send('esp32:wifi', { wifi: automation.wifi, url: automation.panelUrl() }));
+  automation.on('drivers', (list) => send('automation:drivers', list));
+  automation.start();
+}
 esp32.on('log', (e) => send('esp32:log', e));
 
 // ---------- Ayarlar (her değişiklik anında diske yazılır) ----------
 const publicSettings = () => ({ ...store.get('settings'), hasApiKey: !!store.getApiKey() });
 handle('settings:get', publicSettings);
-handle('settings:set', async (patch) => {
+handle('settings:set', (patch) => setSettings(patch));
+async function setSettings(patch) {
   const { apiKey, hasApiKey: _x, ...rest } = patch;
   if (apiKey !== undefined) store.setApiKey(apiKey);
   store.patch('settings', rest);
@@ -243,8 +274,9 @@ handle('settings:set', async (patch) => {
     win.setTitleBarOverlay(OVERLAY[rest.theme] || OVERLAY.light);
     win.setBackgroundColor(rest.theme === 'dark' ? '#0f0f13' : '#efedf6');
   }
+  send('settings:changed', publicSettings());
   return publicSettings();
-});
+}
 handle('ui:get', () => store.get('ui'));
 handle('ui:set', (patch) => store.patch('ui', patch));
 handle('chat:get', () => store.get('chat') || []);
@@ -336,6 +368,7 @@ if (!app.requestSingleInstanceLock()) {
     updater.init();
     rgb.restore();
     inventory.get().catch((e) => log.warn('Envanter', e));
+    startAutomation();
   });
 }
 app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); esp32.disconnect(); });

@@ -57,7 +57,9 @@ try {
 finally { if ($sp.IsOpen) { $sp.Close() }; $reader.Stop(); $rs.Close() }
 `;
 
-const ALLOWED_COMMANDS = new Set(['led', 'ping', 'notify', 'info']); // ESP32'ye gönderilebilen komutlar
+const ALLOWED_COMMANDS = new Set(['led', 'ping', 'notify', 'info', 'wifi', 'wifi_off', 'result']); // ESP32'ye gönderilebilen komutlar
+const SECRET_KEYS = ['pass', 'token']; // günlükte asla açık yazılmaz
+const redact = (line) => line.replace(/"(pass|token)":"[^"]*"/g, '"$1":"***"');
 
 class Esp32Hub extends EventEmitter {
   constructor({ log } = {}) {
@@ -202,7 +204,7 @@ class Esp32Hub extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pendingReq.delete(id); reject(new Error(`${t} yanıtı gelmedi (${timeoutMs} ms)`)); }, timeoutMs);
       this.pendingReq.set(id, { resolve: (m) => { clearTimeout(timer); resolve(m); }, reject: (e) => { clearTimeout(timer); reject(e); } });
-      try { this.writeRaw(line); this.pushLog('out', line.trim()); } catch (e) { clearTimeout(timer); this.pendingReq.delete(id); reject(e); }
+      try { this.writeRaw(line); this.pushLog('out', redact(line.trim())); } catch (e) { clearTimeout(timer); this.pendingReq.delete(id); reject(e); }
     });
   }
 
@@ -212,6 +214,7 @@ class Esp32Hub extends EventEmitter {
       this.device = hello;
       this.pushLog('sys', `Orbit firmware: ${hello.fw || '?'} v${hello.ver || '?'} · ${hello.chip || 'çip bilinmiyor'}`);
       this.startHeartbeat();
+      this.emit('connected', hello);
     } catch {
       this.device = null;
       this.pushLog('sys', 'Kartta Orbit firmware yanıt vermedi: ham seri konsol modunda bağlı');
@@ -253,10 +256,19 @@ class Esp32Hub extends EventEmitter {
     if (!ALLOWED_COMMANDS.has(cmd)) throw new Error(`İzin verilmeyen komut: ${cmd}`);
     if (!this.device) throw new Error('Kartta Orbit firmware çalışmıyor');
     if (cmd === 'led' && !(this.device.caps || []).includes('led')) throw new Error('Bu kart dahili LED bildirmiyor');
-    const clean = Object.fromEntries(Object.entries(args).filter(([k, v]) => /^[a-z]{1,16}$/i.test(k) && ['string', 'number', 'boolean'].includes(typeof v)).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 120) : v]));
+    const max = cmd === 'result' ? 400 : 120;
+    const clean = Object.fromEntries(Object.entries(args).filter(([k, v]) => /^[a-z]{1,16}$/i.test(k) && ['string', 'number', 'boolean'].includes(typeof v)).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, max) : v]));
     const t0 = Date.now();
     const res = await this.request('COMMAND', { cmd, ...clean }, 3000);
     return { ...res, rttMs: Date.now() - t0 };
+  }
+
+  /** Orbit'in anlık durumunu karta gönderir (ikiz). Yanıt beklenmez, günlüğe yazılmaz (3 sn'de bir). */
+  sendState(state) {
+    // Eski firmware (0.1) STATE türünü tanımaz: yalnızca "state" yeteneği bildiren karta gönder
+    if (!this.proc || !this.device || !(this.device.caps || []).includes('state')) return false;
+    this.writeRaw(P.encode({ t: 'STATE', ...state }));
+    return true;
   }
 
   async readStatus() {
@@ -308,4 +320,4 @@ function identifyWithEsptool(port) {
   });
 }
 
-module.exports = { Esp32Hub, BRIDGES, ALLOWED_COMMANDS, BRIDGE_PS, parseEsptool, identifyWithEsptool };
+module.exports = { Esp32Hub, BRIDGES, ALLOWED_COMMANDS, SECRET_KEYS, redact, BRIDGE_PS, parseEsptool, identifyWithEsptool };

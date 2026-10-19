@@ -919,6 +919,14 @@ async function loadDrivers(force = false) {
 }
 api.inventory.onChanged(async () => { await loadInstalled(); S.recs = (await safe(() => api.drivers.recommend())) || S.recs; if (S.page === 'drivers') renderPage(); });
 
+// Ayar başka bir yerden (ör. ESP32) değişirse ekranı güncelle
+api.onSettingsChanged((s) => {
+  S.settings = s;
+  document.documentElement.dataset.theme = s.theme;
+  renderChrome();
+  if (S.page === 'settings') renderPage();
+});
+
 // Arayüz hatalarını günlüğe yaz
 window.addEventListener('error', (e) => api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => api.app.log('error', 'Promise: ' + (e.reason?.stack || e.reason)));
