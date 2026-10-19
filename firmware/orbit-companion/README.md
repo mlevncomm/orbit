@@ -5,7 +5,7 @@ ESP32 kartının Orbit ile konuşmasını sağlayan firmware. Protokol: JSON Lin
 ## Durum
 
 - **2026-10-19: COM3'teki karta yüklendi ve çift yönlü test edildi** (`npm run test:hardware`, 7/7).
-  Derleme: arduino-cli 1.5.1, esp32 core 3.3.12, ArduinoJson 7.4.3, `-DORBIT_LED_PIN=-1` (LED pini doğrulanmadı).
+  Derleme: arduino-cli 1.5.1, esp32 core 3.3.12, ArduinoJson 7.4.3, `-DORBIT_LED_PIN=2` (kartta mavi LED var, kullanıcı doğruladı; aç/kapat/yanıp sönme test edildi).
 - Yükleme notu: arduino-cli'nin paketlediği esptool 5.3.1 bu kartın CH340 köprüsüyle "Unable to verify flash chip
   connection" hatası verdi; aynı dosyalar pip ile kurulan esptool 5.6.0 ile 460800 baud'da sorunsuz yüklendi:
   ```powershell
