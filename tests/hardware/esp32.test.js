@@ -76,3 +76,16 @@ hw('kes ve yeniden bağlan: kart resetlenmez', async () => {
   const s2 = await hub.readStatus();
   assert.ok(s2.uptimeMs > s1.uptimeMs, 'kart yeniden başlamamalı');
 });
+
+hw('ikiz: STATE kartta saklanır, LED otomatik durum ışığı', async () => {
+  if (!hub.device.caps.includes('state')) return; // firmware 0.1
+  assert.ok(hub.sendState({ pc: 'test', cpu: 5, ram: 30, lights: { on: true, name: 'Aurora' }, queue: { running: false, active: 0, current: '' }, updates: 0, presets: [], profiles: [] }));
+  await new Promise((r) => setTimeout(r, 300));
+  const s = await hub.readStatus();
+  assert.ok(s.stateAgeMs >= 0 && s.stateAgeMs < 2000, `durum yaşı ${s.stateAgeMs}`);
+  assert.ok(s.wifi && typeof s.wifi.configured === 'boolean');
+  if (hub.device.caps.includes('led')) {
+    await hub.command('led', { state: 'auto' });
+    assert.equal((await hub.readStatus()).ledAuto, true);
+  }
+});
