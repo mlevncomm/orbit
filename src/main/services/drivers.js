@@ -108,7 +108,46 @@ function vendorRecommendations(sys) {
     const p = PERIPHERALS[String(vid).toUpperCase()];
     if (p) recs.push({ key: 'drv_vid_' + vid, name: p.name, target: 'Çevre Birimi', color: p.color, desc: `${p.what} algılandı: tuş atama, DPI, makro ve üretici sürücüsü.`, source: 'winget', wingetId: p.wingetId, auto: true });
   }
-  return recs;
+  // Bağlantı olarak önerilenler dahil hepsinin kurulu olup olmadığı kayıt defteri adıyla da anlaşılsın
+  const MATCH = {
+    drv_nvidia: /^NVIDIA app/i, drv_amdgpu: /^AMD Software/i, drv_intel: /Driver & Support Assistant/i,
+    drv_amdchipset: /^AMD Chipset Software/i, drv_openrgb: /^OpenRGB/i,
+    'Logitech G HUB': /^LGHUB|^Logitech G HUB/i, 'Corsair iCUE 5': /iCUE/i, 'Razer Synapse 4': /Razer Synapse/i, 'SteelSeries GG': /SteelSeries GG/i,
+  };
+  return recs.map((r) => ({ ...r, match: MATCH[r.key] || MATCH[r.name] }));
 }
 
-module.exports = { scanWindowsUpdate, installWindowsUpdate, vendorRecommendations };
+// Kurulu sürücü envanteri: önemli aygıt sınıflarının sürücü sağlayıcısı, sürümü ve tarihi
+const DRIVER_CLASSES = {
+  DISPLAY: 'Ekran kartı', NET: 'Ağ / Wi-Fi', MEDIA: 'Ses', BLUETOOTH: 'Bluetooth', SYSTEM: 'Yonga seti',
+  HDC: 'Depolama', SCSIADAPTER: 'Depolama', USB: 'USB', HIDCLASS: 'Giriş aygıtı', CAMERA: 'Kamera', IMAGE: 'Kamera',
+};
+let driverCache = null;
+
+async function installedDrivers(force = false) {
+  if (driverCache && !force) return driverCache;
+  const classes = Object.keys(DRIVER_CLASSES).map((c) => `'${c}'`).join(',');
+  const list = await runPSJson(`
+    $want = @(${classes})
+    @(Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceName -and $want -contains ([string]$_.DeviceClass).ToUpper() } |
+      ForEach-Object { @{ name=$_.DeviceName; cls=([string]$_.DeviceClass).ToUpper(); provider=$_.DriverProviderName; maker=$_.Manufacturer;
+        version=$_.DriverVersion; date=if($_.DriverDate){$_.DriverDate.ToString('yyyy-MM-dd')}else{''}; inf=$_.InfName } }) | ConvertTo-Json -Depth 3 -Compress
+  `, { timeoutMs: 120000 });
+  const now = Date.now();
+  const seen = new Set();
+  driverCache = [].concat(list || [])
+    // Yalnızca gerçek donanım sürücüleri: Microsoft'un yerleşik/sanal sürücüleri gizlenir.
+    // İstisna: ekran kartı Microsoft'un temel sürücüsündeyse (sürücü eksik demektir) gösterilir.
+    .filter((d) => !/^Microsoft$/i.test(d.provider || '') || d.cls === 'DISPLAY')
+    .filter((d) => !/WAN Miniport|Kernel Debug|Wi-Fi Direct Virtual|Bluetooth Device \(|Generic Attribute|Generic Access|Device Information Service/i.test(d.name))
+    .filter((d) => { const k = d.name + d.version; if (seen.has(k)) return false; seen.add(k); return true; })
+    .map((d) => {
+      const generic = /^Microsoft$/i.test(d.provider || '');
+      const ageMonths = d.date && !generic ? Math.max(0, Math.floor((now - new Date(d.date).getTime()) / (30.4 * 864e5))) : null;
+      return { ...d, group: DRIVER_CLASSES[d.cls] || d.cls, ageMonths, generic };
+    })
+    .sort((a, b) => Object.keys(DRIVER_CLASSES).indexOf(a.cls) - Object.keys(DRIVER_CLASSES).indexOf(b.cls) || a.name.localeCompare(b.name));
+  return driverCache;
+}
+
+module.exports = { scanWindowsUpdate, installWindowsUpdate, vendorRecommendations, installedDrivers };

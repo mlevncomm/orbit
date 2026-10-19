@@ -28,7 +28,8 @@ contextBridge.exposeInMainWorld('orbit', {
   },
   selection: { get: () => call('selection:get'), set: (k) => call('selection:set', k) },
   profile: { export: () => call('profile:export'), import: () => call('profile:import') },
-  drivers: { recommend: () => call('drivers:recommend'), scan: () => call('drivers:scan') },
+  drivers: { recommend: () => call('drivers:recommend'), scan: () => call('drivers:scan'), installed: (force) => call('drivers:installed', force) },
+  inventory: { get: (force) => call('inventory:get', force), onChanged: on('inventory:changed') },
   install: {
     run: (items) => call('install:run', items),
     cancel: () => call('install:cancel'),
@@ -51,6 +52,8 @@ contextBridge.exposeInMainWorld('orbit', {
     apply: (profile, deviceId) => call('rgb:apply', profile, deviceId),
     native: (deviceId, mode, opts) => call('rgb:native', deviceId, mode, opts),
     live: () => call('rgb:live'),
+    power: (on) => call('rgb:power', on),
+    exclude: (id, ex) => call('rgb:exclude', id, ex),
     save: (p) => call('rgb:save', p).finally(() => ipcRenderer.send('tray:rebuild')),
     remove: (id) => call('rgb:delete', id).finally(() => ipcRenderer.send('tray:rebuild')),
     onStatus: on('rgb:status'),

@@ -12,6 +12,7 @@ const installer = require('./services/installer');
 const assistant = require('./ai/assistant');
 const rgb = require('./services/rgb');
 const updater = require('./services/updater');
+const inventory = require('./services/inventory');
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -106,7 +107,12 @@ function createWindow() {
 
 const send = (channel, payload) => win && !win.isDestroyed() && win.webContents.send(channel, payload);
 installer.on('progress', (p) => send('install:progress', p));
-installer.on('state', (s) => send('install:state', s));
+installer.on('state', (s) => {
+  send('install:state', s);
+  // Kurulum bitince bilgisayardaki durumu yeniden tara (Kurulu / sürüm / güncelleme rozetleri)
+  if (!s.running) { inventory.invalidate(); inventory.get(true).catch((e) => log.warn('Envanter', e)); }
+});
+inventory.on('changed', (sum) => send('inventory:changed', sum));
 
 const handle = (ch, fn) => ipcMain.handle(ch, async (_e, ...args) => {
   try { return { ok: true, data: await fn(...args) }; } catch (e) {
@@ -119,6 +125,7 @@ const handle = (ch, fn) => ipcMain.handle(ch, async (_e, ...args) => {
 handle('system:info', (force) => system.getSystemInfo(force));
 handle('system:isAdmin', () => system.isAdmin());
 handle('system:installed', () => system.getInstalledWingetIds());
+handle('inventory:get', async (force) => { const d = await inventory.get(force); return { programs: d.programs, upgrades: d.upgrades, scannedAt: d.scannedAt }; });
 handle('system:relaunchAdmin', async () => {
   const exe = process.execPath.replace(/'/g, "''");
   const args = app.isPackaged ? '' : ` -ArgumentList '"${app.getAppPath().replace(/'/g, "''")}"'`;
@@ -171,8 +178,14 @@ handle('profile:import', async () => {
 });
 
 // ---------- Sürücüler ----------
-handle('drivers:recommend', async () => drivers.vendorRecommendations(await system.getSystemInfo()));
+handle('drivers:recommend', async () => {
+  const recs = drivers.vendorRecommendations(await system.getSystemInfo());
+  await inventory.get().catch(() => null);
+  // RegExp IPC üzerinden taşınamaz: durumu burada hesapla, kuralı gönderme
+  return recs.map(({ match, ...r }) => ({ ...r, status: inventory.statusOf({ ...r, match }) }));
+});
 handle('drivers:scan', () => drivers.scanWindowsUpdate());
+handle('drivers:installed', (force) => drivers.installedDrivers(force));
 
 // ---------- Kurulum ----------
 handle('install:run', (items) => installer.enqueue(items));
@@ -210,6 +223,8 @@ handle('rgb:connect', () => rgb.connect());
 handle('rgb:refresh', async () => { await rgb.refresh(); return rgb.status(); });
 handle('rgb:apply', (profile, deviceId) => rgb.apply(profile, deviceId));
 handle('rgb:live', () => rgb.live());
+handle('rgb:power', (on) => rgb.power(on));
+handle('rgb:exclude', (id, ex) => rgb.setExcluded(id, ex));
 handle('rgb:native', (deviceId, mode, opts) => rgb.applyNative(deviceId, mode, opts));
 handle('rgb:save', (p) => rgb.saveProfile(p));
 handle('rgb:delete', (id) => rgb.deleteProfile(id));
@@ -283,6 +298,7 @@ if (!app.requestSingleInstanceLock()) {
     applyStartup().catch((e) => log.warn('Başlangıç görevi', e));
     updater.init();
     rgb.restore();
+    inventory.get().catch((e) => log.warn('Envanter', e));
   });
 }
 app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); });

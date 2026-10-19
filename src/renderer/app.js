@@ -61,7 +61,9 @@ function hydrateIcons(root = document) {
 }
 const appIcon = (a, size) => `<span class="app-ic" style="background:${h(a.color || '#111')}${size ? `;width:${size}px;height:${size}px` : ''}">${h(initials(a.name))}</span>`;
 const boardName = (sys) => `${sys.board.vendor.replace(/\s*(Technology Co\., Ltd\.|COMPUTER INC\.|Co\., Ltd\.|Inc\.|Corporation)/gi, '')} ${sys.board.product}`;
-const isInstalled =(a) => a.wingetId && S.installed.has(a.wingetId.toLowerCase());
+const isInstalled = (a) => !!a.status?.installed;
+const PALETTE = ['#6d5bd0', '#1a73e8', '#e0245e', '#13aa52', '#f58220', '#0b8a8a', '#7c3aed', '#c2410c', '#2563eb', '#be185d'];
+const colorFor = (name) => PALETTE[[...String(name)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
 const selectedApps = () => S.catalog.apps.filter((a) => S.selection.has(a.key));
 const persistSelection = () => api.selection.set([...S.selection]);
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -181,7 +183,7 @@ PAGES.dashboard = () => {
         </div>
         <div class="hero-stats">
           <div class="stat"><b>${apps.length}</b><span>seçili program</span></div>
-          <div class="stat"><b>${autoRecs.length + (S.opts.wu ? 1 : 0)}</b><span>sürücü kaynağı</span></div>
+          <button class="stat" data-apps-view="updates"><b>${S.inv ? S.inv.upgrades.length : '…'}</b><span>güncelleme bekliyor</span></button>
           <div class="stat"><b style="color:${problems ? 'var(--danger)' : 'inherit'}">${sys ? problems : '…'}</b><span>sorunlu cihaz</span></div>
           <div class="stat"><b>${S.installedLoaded ? S.catalog.apps.filter(isInstalled).length : '…'}</b><span>zaten kurulu</span></div>
         </div>
@@ -209,62 +211,141 @@ PAGES.dashboard = () => {
     </div>`;
 };
 
+const shortVer = (v) => String(v || '').split('.').slice(0, 3).join('.');
+const ageClass = (m) => (m == null ? '' : m < 12 ? 'ok' : m < 24 ? 'warn' : 'old');
+const ageText = (m) => (m == null ? 'Windows yerleşik' : m < 1 ? 'bu ay' : m < 12 ? `${m} ay önce` : `${Math.floor(m / 12)} yıl ${m % 12 ? (m % 12) + ' ay ' : ''}önce`);
+
+/** Programlar ve sürücüler için "bu bilgisayar" özeti */
+function invSummary() {
+  if (!S.inv) return `<span class="chip"><span class="spinner" style="width:12px;height:12px"></span>Bilgisayar taranıyor…</span>`;
+  const inst = S.catalog.apps.filter(isInstalled).length;
+  const t = new Date(S.inv.scannedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return `<span class="chip"><span class="status-dot done"></span>${S.inv.programs.length} program kurulu</span>
+    <span class="chip">${I('check', 13)}${inst} katalog programı</span>
+    ${S.inv.upgrades.length ? `<button class="chip warn" data-apps-view="updates">${I('download', 13)}${S.inv.upgrades.length} güncelleme</button>` : `<span class="chip ok">${I('shield', 13)}Hepsi güncel</span>`}
+    <button class="chip" data-action="rescan" title="Son tarama ${t}">${I('refresh', 13)}${S.invLoading ? 'Taranıyor…' : t}</button>`;
+}
+
 PAGES.drivers = () => {
   const sys = S.sys;
   const hw = (bg, icon, label, title, meta) => `<div class="hw" style="background:${bg}"><span class="ic">${I(icon)}</span><small>${label}</small><b>${h(title)}</b><small>${h(meta || '')}</small></div>`;
   const gpus = sys?.gpus || [];
+  const drv = S.drivers;
+  const gpuDrv = drv?.find((d) => d.cls === 'DISPLAY' && !d.generic);
   const recs = S.recs.map((r) => {
     const job = S.jobs.get(r.key);
+    const st = r.status || (r.wingetId ? S.catalog.apps.find((a) => a.wingetId === r.wingetId)?.status : null);
+    const installed = st?.installed;
     return `<div class="rec-item">
       ${appIcon(r)}
-      <div class="txt"><span class="kicker">${h(r.target)}</span><br><b>${h(r.name)}</b><p>${h(r.desc)}</p></div>
+      <div class="txt"><span class="kicker">${h(r.target)}</span><br><b>${h(r.name)}</b>${installed ? ` <span class="badge">Kurulu${st.version ? ' · v' + h(shortVer(st.version)) : ''}</span>` : ''}<p>${h(r.desc)}</p></div>
       ${r.source === 'winget'
-        ? `<button class="btn primary sm" data-install-rec="${r.key}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job)) : 'Kur'}</button>`
-        : `<button class="btn sm" data-open="${h(r.url)}">${I('external')}Resmi sayfa</button>`}
+        ? `<button class="btn ${installed && !st.available ? '' : 'primary'} sm" data-install-rec="${r.key}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I(installed ? 'refresh' : 'download')}${job ? h(statusLabel(job)) : installed ? (st.available ? 'Güncelle' : 'Yeniden kur') : 'Kur'}</button>`
+        : `<button class="btn sm" data-open="${h(r.url)}">${I('external')}${installed ? 'Güncelini kontrol et' : 'Resmi sayfa'}</button>`}
     </div>`;
   }).join('');
 
   let wu;
   if (S.scanning) wu = `<div class="empty"><span class="spinner"></span><p>Windows Update sorgulanıyor… (1-3 dakika)</p></div>`;
   else if (!S.wu) wu = `<div class="empty"><p>Donanım kimliklerine göre Microsoft'un onayladığı sürücüleri bulmak için tarayın.</p><button class="btn primary" data-action="scan-wu">${I('search')}Sürücüleri tara</button></div>`;
-  else if (!S.wu.length) wu = `<div class="empty">${I('check', 28)}<p>Bekleyen sürücü güncellemesi yok. Her şey güncel.</p><button class="btn sm" data-action="scan-wu">${I('refresh')}Tekrar tara</button></div>`;
+  else if (!S.wu.length) wu = `<div class="empty">${I('check', 28)}<p>Windows Update'te bekleyen sürücü yok. Hepsi güncel.</p><button class="btn sm" data-action="scan-wu">${I('refresh')}Tekrar tara</button></div>`;
   else wu = `<table class="table"><thead><tr><th><input type="checkbox" data-wu-all ${S.wuSel.size === S.wu.length ? 'checked' : ''}></th><th>Sürücü</th><th>Sınıf</th><th>Tarih</th><th>Boyut</th></tr></thead><tbody>
       ${S.wu.map((d) => `<tr><td><input type="checkbox" data-wu="${h(d.id)}" ${S.wuSel.has(d.id) ? 'checked' : ''}></td><td><b>${h(d.title)}</b><br><small class="sub">${h(d.vendor || '')}</small></td><td>${h(d.cls || '-')}</td><td>${h(d.date || '-')}</td><td>${d.sizeMB} MB</td></tr>`).join('')}
     </tbody></table>
     <div class="row" style="margin-top:12px"><span class="sub">${S.wuSel.size} / ${S.wu.length} seçili</span><span class="spacer"></span><button class="btn sm" data-action="scan-wu">${I('refresh')}Yeniden tara</button><button class="btn primary sm" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur</button></div>`;
 
+  const installedTable = !drv
+    ? `<div class="empty"><span class="spinner"></span><p>Kurulu sürücüler okunuyor…</p></div>`
+    : `<table class="table drv"><thead><tr><th>Aygıt</th><th>Sağlayıcı</th><th>Sürüm</th><th>Tarih</th></tr></thead><tbody>
+      ${drv.map((d) => `<tr><td><span class="kicker">${h(d.group)}</span><br><b>${h(d.name)}</b></td><td>${h(d.provider || '-')}</td><td><code>${h(d.version)}</code></td>
+        <td><span class="age ${ageClass(d.ageMonths)}">${h(d.generic ? 'Temel sürücü!' : d.date || '-')}</span><br><small class="sub">${h(ageText(d.ageMonths))}</small></td></tr>`).join('')}
+    </tbody></table>`;
+  const old = (drv || []).filter((d) => d.ageMonths >= 24).length;
   const problems = sys?.problemDevices || [];
   return `
     ${adminBanner()}
-    <div class="page-head"><div><h1>Sürücüler</h1><p>Anakartın ve donanımın desteklediği güncel sürücüler</p></div>
-      <button class="btn" data-action="refresh-sys">${I('refresh')}Donanımı yeniden algıla</button></div>
+    <div class="page-head"><div><h1>Sürücüler</h1><p>Bu bilgisayardaki sürücülerin durumu ve güncel sürümleri</p></div>
+      <button class="btn" data-action="refresh-sys">${I('refresh')}Yeniden algıla</button></div>
     <div class="hw-grid">
       ${hw('var(--lilac)', 'cpu', 'İşlemci', sys?.cpu.name || '…', sys ? `${sys.cpu.cores} çekirdek / ${sys.cpu.threads} iş parçacığı` : '')}
-      ${gpus.map((g) => hw('var(--peach)', 'gpu', 'Ekran kartı', g.name, g.driver ? `Sürücü ${g.driver}${g.date ? ' · ' + g.date : ''}` : '')).join('') || hw('var(--peach)', 'gpu', 'Ekran kartı', '…')}
+      ${gpus.filter((g) => !/basic|microsoft/i.test(g.name) || gpus.length === 1).map((g) => hw('var(--peach)', 'gpu', 'Ekran kartı', g.name, g.driver ? `Sürücü ${g.driver}${gpuDrv ? ' · ' + ageText(gpuDrv.ageMonths) : ''}` : '')).join('') || hw('var(--peach)', 'gpu', 'Ekran kartı', '…')}
       ${hw('var(--sky)', 'board', 'Anakart', sys ? boardName(sys) : '…', sys ? `BIOS ${sys.bios.version}` : '')}
       ${hw('var(--mint)', 'windows', 'Sistem', sys?.os.name || '…', sys ? `Derleme ${sys.os.build} · ${sys.ramGB} GB RAM · C: ${sys.disk.freeGB}/${sys.disk.totalGB} GB boş` : '')}
     </div>
+    <div class="stat-row">
+      <div class="mini-stat"><b>${drv ? drv.length : '…'}</b><span>donanım sürücüsü</span></div>
+      <div class="mini-stat ${problems.length ? 'bad' : 'good'}"><b>${sys ? problems.length : '…'}</b><span>sorunlu cihaz</span></div>
+      <div class="mini-stat ${S.wu?.length ? 'warn' : S.wu ? 'good' : ''}"><b>${S.wu ? S.wu.length : S.scanning ? '…' : '?'}</b><span>Windows Update sürücüsü</span></div>
+      <div class="mini-stat ${old ? 'warn' : 'good'}"><b>${drv ? old : '…'}</b><span>2 yıldan eski sürücü</span></div>
+    </div>
     <div class="two">
-      <div class="card"><h3>Üretici araçları</h3><p class="sub" style="margin-bottom:12px">Algılanan donanıma göre öneriler</p><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
+      <div class="card"><h3>Üretici araçları</h3><p class="sub" style="margin-bottom:12px">Algılanan donanıma göre: kurulu olanlar işaretli</p><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
       <div class="card"><h3>Sorunlu cihazlar</h3><p class="sub" style="margin-bottom:12px">Aygıt Yöneticisi'nde sürücüsü eksik veya hatalı görünenler</p>
-        ${problems.length ? `<div class="rec-list">${problems.map((p) => `<div class="rec-item"><span style="color:var(--danger)">${I('alert')}</span><div class="txt"><b>${h(p.name || 'Bilinmeyen aygıt')}</b><p>Hata kodu ${p.code} · ${h(p.id)}</p></div></div>`).join('')}</div><p class="sub" style="margin-top:10px">Windows Update taraması bu cihazların çoğu için sürücü bulur.</p>`
+        ${problems.length ? `<div class="rec-list">${problems.map((p) => `<div class="rec-item"><span style="color:var(--danger)">${I('alert')}</span><div class="txt"><b>${h(p.name || 'Bilinmeyen aygıt')}</b><p>Hata kodu ${p.code} · ${h(p.id)}</p></div></div>`).join('')}</div>`
           : `<div class="empty">${I('shield', 28)}<p>${sys ? 'Tüm cihazlar çalışıyor.' : 'Kontrol ediliyor…'}</p></div>`}
       </div>
     </div>
-    <div class="card" style="margin-top:12px"><h3>Windows Update sürücüleri</h3><p class="sub" style="margin-bottom:8px">Yonga seti, ses, ağ, Wi-Fi, Bluetooth ve ekran kartı için donanım kimliğine göre eşleşen sürücüler</p>${wu}</div>`;
+    <div class="card" style="margin-top:12px"><h3>Windows Update sürücüleri</h3><p class="sub" style="margin-bottom:8px">Donanım kimliğine göre bu bilgisayar için onaylı, henüz kurulmamış sürücüler (sayfa açılınca otomatik taranır)</p>${wu}</div>
+    <div class="card" style="margin-top:12px"><div class="row"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><span class="spacer"></span><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div>${installedTable}</div>`;
+};
+PAGES.driversAfter = () => {
+  if (!S.drivers && !S.driversLoading) loadDrivers();
+  if (!S.wu && !S.scanning && !S.wuAuto) { S.wuAuto = true; scanWU(); }
 };
 
 PAGES.apps = () => {
   const q = S.query.toLowerCase();
+  const view = S.appsView || 'catalog';
+  const tabs = `<div class="seg view-tabs">
+      <button class="${view === 'catalog' ? 'active' : ''}" data-apps-view="catalog">${I('package', 14)}Katalog</button>
+      <button class="${view === 'pc' ? 'active' : ''}" data-apps-view="pc">${I('windows', 14)}Bu bilgisayar${S.inv ? ` <em>${S.inv.programs.length}</em>` : ''}</button>
+      <button class="${view === 'updates' ? 'active' : ''}" data-apps-view="updates">${I('download', 14)}Güncellemeler${S.inv?.upgrades.length ? ` <em class="hot">${S.inv.upgrades.length}</em>` : ''}</button>
+    </div>`;
+  const head = `
+    ${adminBanner()}
+    <div class="page-head"><div><h1>Programlar</h1><p>Bu bilgisayarda ne kurulu, hangi sürümde, neyin güncellemesi var — hepsi tek yerde</p></div>
+      <div class="row">${view === 'catalog' ? `<button class="btn" data-action="select-rec">${I('star')}Önerilenleri seç</button>` : ''}<button class="btn primary" data-action="add-app">${I('plus')}Program ekle</button></div></div>
+    <div class="row inv-row">${invSummary()}</div>
+    <div class="toolbar">${tabs}<label class="search">${I('search')}<input id="appSearch" placeholder="${view === 'pc' ? 'Bu bilgisayarda ara…' : 'Program ara…'}" value="${h(S.query)}"></label></div>`;
+
+  if (view === 'pc') {
+    const list = (S.inv?.programs || []).filter((p) => !q || p.name.toLowerCase().includes(q) || (p.publisher || '').toLowerCase().includes(q));
+    return head + (!S.inv ? `<div class="card empty"><span class="spinner"></span><p>Kurulu programlar okunuyor…</p></div>` : `
+      <div class="card"><table class="table progs"><thead><tr><th>Program</th><th>Sürüm</th><th>Yayıncı</th><th>Boyut</th><th></th></tr></thead><tbody>
+      ${list.map((p) => {
+        const job = p.wingetId && S.jobs.get('upg_' + p.wingetId);
+        return `<tr><td><div class="row" style="flex-wrap:nowrap">${appIcon({ name: p.name, color: colorFor(p.name) }, 30)}<div><b>${h(p.name)}</b>${p.wingetId ? `<br><small class="sub mono">${h(p.wingetId)}</small>` : p.store ? '<br><small class="sub">Microsoft Store</small>' : ''}</div></div></td>
+        <td><code>${h(shortVer(p.version) || '-')}</code></td><td class="sub">${h(p.publisher || '-')}</td><td class="sub">${p.sizeMB ? (p.sizeMB >= 1024 ? (p.sizeMB / 1024).toFixed(1) + ' GB' : p.sizeMB + ' MB') : '-'}</td>
+        <td>${p.available ? `<button class="btn primary sm" data-upgrade="${h(p.wingetId)}" data-upgrade-name="${h(p.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job)) : `v${h(shortVer(p.available))}`}</button>` : p.wingetId ? `<span class="badge">Güncel</span>` : ''}</td></tr>`;
+      }).join('')}
+      </tbody></table>${list.length ? '' : '<div class="empty">Sonuç yok.</div>'}</div>`);
+  }
+
+  if (view === 'updates') {
+    const ups = (S.inv?.upgrades || []).filter((u) => !q || u.name.toLowerCase().includes(q));
+    return head + (!S.inv ? `<div class="card empty"><span class="spinner"></span><p>Güncellemeler denetleniyor…</p></div>`
+      : !ups.length ? `<div class="card empty">${I('shield', 34)}<h3 style="margin-top:10px">Her şey güncel</h3><p>winget ile yönetilen tüm programlar en son sürümde.</p></div>`
+      : `<div class="card"><div class="row" style="margin-bottom:10px"><b>${ups.length} programın yeni sürümü var</b><span class="spacer"></span><button class="btn primary" data-action="upgrade-all" ${S.running ? 'disabled' : ''}>${I('download')}Tümünü güncelle</button></div>
+        <div class="rec-list">${ups.map((u) => {
+          const job = S.jobs.get('upg_' + u.id);
+          return `<div class="rec-item">${appIcon({ name: u.name, color: colorFor(u.name) })}<div class="txt"><b>${h(u.name)}</b><p><code>${h(shortVer(u.version))}</code> → <code class="new">${h(shortVer(u.available))}</code> · <span class="mono">${h(u.id)}</span></p></div>
+            <button class="btn primary sm" data-upgrade="${h(u.id)}" data-upgrade-name="${h(u.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job) + (job.status === 'running' ? ' %' + job.percent : '')) : 'Güncelle'}</button></div>`;
+        }).join('')}</div></div>`);
+  }
+
   const visible = S.catalog.apps.filter((a) => (S.cat === 'all' || a.category === S.cat) && (!q || a.name.toLowerCase().includes(q) || (a.desc || '').toLowerCase().includes(q)));
   const count = (id) => S.catalog.apps.filter((a) => a.category === id).length;
-  const cats = [{ id: 'all', name: 'Tümü' }, ...S.catalog.categories].filter((c) => c.id === 'all' || count(c.id) || c.id === 'custom');
+  const cats = [{ id: 'all', name: 'Tümü' }, { id: 'installed', name: 'Kurulu' }, ...S.catalog.categories].filter((c) => ['all', 'installed', 'custom'].includes(c.id) || count(c.id));
+  const shown = S.cat === 'installed' ? S.catalog.apps.filter((a) => isInstalled(a) && (!q || a.name.toLowerCase().includes(q))) : visible;
   const card = (a) => {
     const job = S.jobs.get(a.key);
-    return `<button class="app-card ${S.selection.has(a.key) ? 'sel' : ''}" data-toggle="${a.key}">
+    const st = a.status || {};
+    const badge = st.installed
+      ? (st.available ? `<span class="badge upd">${I('download', 11)} v${h(shortVer(st.available))} mevcut</span>` : `<span class="badge">${I('check', 11)} Kurulu${st.version ? ' · v' + h(shortVer(st.version)) : ''}</span>`)
+      : a.recommended ? '<span class="badge star">Önerilen</span>' : '';
+    return `<button class="app-card ${S.selection.has(a.key) ? 'sel' : ''} ${st.installed ? 'inst' : ''}" data-toggle="${a.key}" title="${st.installed ? (st.available ? 'Seçersen güncellenir' : 'Kurulu — seçersen yeniden kurulur/onarılır') : 'Seçersen kurulur'}">
       ${appIcon(a)}
-      <span class="txt"><b>${h(a.name)}</b><small>${h(job ? `${statusLabel(job)} · ${job.message}` : a.desc || sourceLabel(a))}</small>
-        ${isInstalled(a) ? '<span class="badge">Kurulu</span>' : a.recommended ? '<span class="badge star">Önerilen</span>' : ''}</span>
+      <span class="txt"><b>${h(a.name)}</b><small>${h(job ? `${statusLabel(job)} · ${job.message}` : a.desc || sourceLabel(a))}</small>${badge}</span>
       <span class="check">${I('check', 14)}</span>
       ${a.custom ? `<span class="del" data-remove="${a.key}" title="Kaldır">${I('trash', 14)}</span>` : ''}
       ${job && job.status === 'running' ? `<span class="mini-prog"><i style="width:${job.percent}%"></i></span>` : ''}
@@ -274,18 +355,16 @@ PAGES.apps = () => {
     ? S.catalog.categories.map((c) => {
       const items = visible.filter((a) => a.category === c.id);
       if (!items.length) return '';
-      return `<div class="section-title">${h(c.name)}</div><div class="grid">${items.map(card).join('')}</div>`;
+      return `<div class="section-title">${h(c.name)} <em>${items.filter(isInstalled).length}/${items.length} kurulu</em></div><div class="grid">${items.map(card).join('')}</div>`;
     }).join('')
-    : `<div class="grid">${visible.map(card).join('')}</div>${visible.length ? '' : '<div class="empty">Sonuç yok.</div>'}`;
-  const sel = S.selection.size;
-  return `
-    ${adminBanner()}
-    <div class="page-head"><div><h1>Programlar</h1><p>Seç, tek tıkla sessizce kur. Seçimin otomatik kaydedilir.</p></div>
-      <div class="row"><button class="btn" data-action="select-rec">${I('star')}Önerilenleri seç</button><button class="btn primary" data-action="add-app">${I('plus')}Program ekle</button></div></div>
-    <div class="toolbar"><label class="search">${I('search')}<input id="appSearch" placeholder="Program ara…" value="${h(S.query)}"></label></div>
-    <div class="cats">${cats.map((c) => `<button class="cat ${S.cat === c.id ? 'active' : ''}" data-cat="${c.id}">${h(c.name)}<em>${c.id === 'all' ? S.catalog.apps.length : count(c.id)}</em></button>`).join('')}</div>
+    : `<div class="grid">${shown.map(card).join('')}</div>${shown.length ? '' : '<div class="empty">Sonuç yok.</div>'}`;
+  const selApps = selectedApps();
+  const toInstall = selApps.filter((a) => !isInstalled(a)).length;
+  const toUpdate = selApps.filter((a) => a.status?.available).length;
+  return head + `
+    <div class="cats">${cats.map((c) => `<button class="cat ${S.cat === c.id ? 'active' : ''}" data-cat="${c.id}">${h(c.name)}<em>${c.id === 'all' ? S.catalog.apps.length : c.id === 'installed' ? S.catalog.apps.filter(isInstalled).length : count(c.id)}</em></button>`).join('')}</div>
     ${S.cat === 'custom' && !count('custom') ? `<div class="card empty">${I('plus', 28)}<p>Kendi programlarını ekle: winget kataloğundan ara, indirme bağlantısı ver, npm paketi ya da PowerShell komutu yaz.</p><button class="btn primary" data-action="add-app">Program ekle</button></div>` : groups}
-    ${sel ? `<div class="sticky-bar"><b>${sel} program seçili</b><span class="spacer"></span><button class="btn sm" data-action="clear-sel">Temizle</button><button class="btn sm go" data-action="install-sel" ${S.running ? 'disabled' : ''}>${I('download')}Seçilenleri kur</button></div>` : ''}`;
+    ${selApps.length ? `<div class="sticky-bar"><b>${selApps.length} seçili</b><span class="sub-light">${toInstall} kurulacak${toUpdate ? ` · ${toUpdate} güncellenecek` : ''}${selApps.length - toInstall - toUpdate > 0 ? ` · ${selApps.length - toInstall - toUpdate} zaten güncel` : ''}</span><span class="spacer"></span><button class="btn sm" data-action="clear-sel">Temizle</button><button class="btn sm go" data-action="install-sel" ${S.running ? 'disabled' : ''}>${I('download')}Seçilenleri kur</button></div>` : ''}`;
 };
 PAGES.appsAfter = () => {
   const inp = $('#appSearch');
@@ -589,7 +668,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine]');
+  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade]');
   if (!t) return;
   const d = t.dataset;
 
@@ -606,6 +685,8 @@ document.addEventListener('click', async (e) => {
   if (d.dashTab) { S.dashTab = d.dashTab; saveUi({ dashTab: d.dashTab }); return renderPage(); }
   if (d.opt) { S.opts[d.opt] = !S.opts[d.opt]; saveUi({ opts: { ...S.opts } }); return renderPage(); }
   if (d.engine) { await saveSetting({ rgbEngine: d.engine }); return renderPage(); }
+  if (d.appsView) { S.appsView = d.appsView; S.query = ''; saveUi({ appsView: d.appsView }); if (S.page !== 'apps') return navigate('apps'); return renderPage(); }
+  if (d.upgrade) return startInstall([{ key: 'upg_' + d.upgrade, name: d.upgradeName || d.upgrade, source: 'winget', wingetId: d.upgrade, color: colorFor(d.upgradeName || d.upgrade) }], `${d.upgradeName || d.upgrade} güncelle`).then(renderPage);
   if (d.themeSet) return setTheme(d.themeSet);
   if (d.open) return safe(() => api.system.open(d.open));
   if (d.installRec) { const r = S.recs.find((x) => x.key === d.installRec); return startInstall([r], `${r.name} kur`); }
@@ -645,6 +726,13 @@ document.addEventListener('click', async (e) => {
       return;
     }
     case 'open-logs': return safe(() => api.app.openLogs());
+    case 'rescan': return loadInstalled(true);
+    case 'reload-drivers': S.drivers = null; renderPage(); return loadDrivers(true);
+    case 'upgrade-all': {
+      const ups = S.inv?.upgrades || [];
+      await startInstall(ups.map((u) => ({ key: 'upg_' + u.id, name: u.name, source: 'winget', wingetId: u.id, color: colorFor(u.name) })), `${ups.length} programı güncelle`);
+      return renderPage();
+    }
     case 'update-check': S.update = await safe(() => api.update.check()) || S.update; return renderPage();
     case 'update-download': return safe(() => api.update.download());
     case 'update-install': return safe(() => api.update.install());
@@ -698,12 +786,24 @@ async function loadSystem(force) {
     pushFeed({ type: 'sys', html: `Donanım algılandı: <b>${h(S.sys.cpu.name)}</b>, <b>${h(boardName(S.sys))}</b>.${p ? ` <b style="color:var(--danger)">${p}</b> cihazın sürücüsü eksik.` : ' Tüm cihazlar çalışıyor.'}` });
   }
 }
-async function loadInstalled() {
-  const ids = await safe(() => api.system.installed());
-  S.installed = new Set(ids || []);
+/** Bilgisayardaki tüm programları, sürümleri ve güncellemeleri okur; katalog rozetlerini yeniler */
+async function loadInstalled(force = false) {
+  S.invLoading = true;
+  if (['apps', 'dashboard'].includes(S.page)) renderPage();
+  const inv = await safe(() => api.inventory.get(force), 'Envanter okunamadı');
+  S.invLoading = false;
+  if (inv) S.inv = inv;
+  S.catalog = await api.catalog.get();
   S.installedLoaded = true;
-  if (S.page !== 'assistant') renderPage();
+  if (S.page !== 'assistant' && S.page !== 'lights') renderPage();
 }
+async function loadDrivers(force = false) {
+  S.driversLoading = true;
+  S.drivers = await safe(() => api.drivers.installed(force), 'Sürücüler okunamadı') || [];
+  S.driversLoading = false;
+  if (S.page === 'drivers') renderPage();
+}
+api.inventory.onChanged(async () => { await loadInstalled(); S.recs = (await safe(() => api.drivers.recommend())) || S.recs; if (S.page === 'drivers') renderPage(); });
 
 // Arayüz hatalarını günlüğe yaz
 window.addEventListener('error', (e) => api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`));
@@ -716,6 +816,7 @@ window.addEventListener('unhandledrejection', (e) => api.app.log('error', 'Promi
   if (ui.dashTab) S.dashTab = ui.dashTab;
   if (ui.opts) S.opts = { ...S.opts, ...ui.opts };
   if (ui.page && ui.page !== 'assistant') S.page = ui.page;
+  if (ui.appsView) S.appsView = ui.appsView;
   S.chat = await api.chat.get().catch(() => []);
   document.documentElement.dataset.theme = S.settings.theme;
   S.update = await api.update.status();

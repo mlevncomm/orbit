@@ -1,4 +1,5 @@
-// Program kataloğu. Tüm winget kimlikleri `winget show --id <id> -e` ile doğrulandı.
+// Program kataloğu. Tüm winget kimlikleri `winget show --id <id> -e` (çıkış kodu 0) ile doğrulandı.
+const inventory = require('./inventory');
 const store = require('./store');
 
 const CATEGORIES = [
@@ -19,7 +20,7 @@ const CATEGORIES = [
 const RAW = [
   ['vcredist', 'Visual C++ Redist', 'essentials', 'Microsoft.VCRedist.2015+.x64', '#6d5bd0', 'Oyun ve programların çoğu için gerekli', true],
   ['directx', 'DirectX Runtime', 'essentials', 'Microsoft.DirectX', '#2f2f2f', 'Eski oyunlar için DirectX bileşenleri', true],
-  ['dotnet8', '.NET Desktop Runtime 8', 'essentials', 'Microsoft.DotNet.DesktopRuntime.8', '#512bd4', '.NET masaüstü uygulamaları için', true],
+  ['dotnet', '.NET Desktop Runtime 10', 'essentials', 'Microsoft.DotNet.DesktopRuntime.10', '#512bd4', '.NET masaüstü uygulamaları için', true],
   ['7zip', '7-Zip', 'essentials', '7zip.7zip', '#1d1d1d', 'Arşiv aç / sıkıştır', true],
 
   ['chrome', 'Google Chrome', 'browsers', 'Google.Chrome', '#1a73e8', 'Hızlı web tarayıcısı', true],
@@ -30,7 +31,7 @@ const RAW = [
   ['vscode', 'Visual Studio Code', 'dev', 'Microsoft.VisualStudioCode', '#007acc', 'Kod editörü', true],
   ['git', 'Git', 'dev', 'Git.Git', '#f05032', 'Sürüm kontrolü', true],
   ['claudecode', 'Claude Code', 'dev', 'Anthropic.ClaudeCode', '#d97757', 'Terminalde yapay zeka kodlama asistanı', true],
-  ['python', 'Python 3.13', 'dev', 'Python.Python.3.13', '#3776ab', 'Python dili ve pip', true],
+  ['python', 'Python 3.14', 'dev', 'Python.Python.3.14', '#3776ab', 'Python dili ve pip', true],
   ['wterminal', 'Windows Terminal', 'dev', 'Microsoft.WindowsTerminal', '#4d4d4d', 'Modern terminal', true],
   ['pwsh', 'PowerShell 7', 'dev', 'Microsoft.PowerShell', '#2671be', 'Güncel PowerShell', true],
   ['ghcli', 'GitHub CLI', 'dev', 'GitHub.cli', '#24292f', 'Terminalden GitHub', true],
@@ -46,14 +47,14 @@ const RAW = [
   ['postman', 'Postman', 'devplus', 'Postman.Postman', '#ff6c37', 'API test aracı', false],
   ['insomnia', 'Insomnia', 'devplus', 'Insomnia.Insomnia', '#4000bf', 'API istemcisi', false],
   ['vsbuild', 'VS Build Tools 2022', 'devplus', 'Microsoft.VisualStudio.2022.BuildTools', '#68217a', 'C++ derleyici (native npm modülleri)', false],
-  ['dotnetsdk', '.NET SDK 9', 'devplus', 'Microsoft.DotNet.SDK.9', '#512bd4', 'C# / .NET geliştirme', false],
-  ['jdk', 'Java JDK 21', 'devplus', 'EclipseAdoptium.Temurin.21.JDK', '#e76f00', 'Java geliştirme', false],
+  ['dotnetsdk', '.NET SDK 10', 'devplus', 'Microsoft.DotNet.SDK.10', '#512bd4', 'C# / .NET geliştirme', false],
+  ['jdk', 'Java JDK 25 LTS', 'devplus', 'EclipseAdoptium.Temurin.25.JDK', '#e76f00', 'Java geliştirme', false],
   ['go', 'Go', 'devplus', 'GoLang.Go', '#00add8', 'Go dili', false],
   ['rust', 'Rustup', 'devplus', 'Rustlang.Rustup', '#b7410e', 'Rust dili', false],
   ['jetbrains', 'JetBrains Toolbox', 'devplus', 'JetBrains.Toolbox', '#000000', 'IntelliJ, WebStorm…', false],
   ['ffmpeg', 'FFmpeg', 'devplus', 'Gyan.FFmpeg', '#0b8a00', 'Video / ses işleme', false],
 
-  ['postgres', 'PostgreSQL 17', 'db', 'PostgreSQL.PostgreSQL.17', '#336791', 'İlişkisel veritabanı', false],
+  ['postgres', 'PostgreSQL 18', 'db', 'PostgreSQL.PostgreSQL.18', '#336791', 'İlişkisel veritabanı', false],
   ['mysql', 'MySQL', 'db', 'Oracle.MySQL', '#00758f', 'İlişkisel veritabanı', false],
   ['mongocompass', 'MongoDB Compass', 'db', 'MongoDB.Compass.Full', '#13aa52', 'MongoDB arayüzü', false],
   ['dbeaver', 'DBeaver', 'db', 'DBeaver.DBeaver.Community', '#382923', 'Evrensel veritabanı aracı', false],
@@ -67,6 +68,7 @@ const RAW = [
   ['ssgg', 'SteelSeries GG', 'rgb', 'SteelSeries.GG', '#ff5200', 'SteelSeries çevre birimleri', false],
   ['gcc', 'GIGABYTE Control Center', 'rgb', 'GIGABYTE.ControlCenter', '#f58220', 'Gigabyte anakart, RGB Fusion, BIOS', false],
 
+  ['claude', 'Claude', 'ai', 'Anthropic.Claude', '#d97757', 'Claude masaüstü uygulaması', false],
   ['ollama', 'Ollama', 'ai', 'Ollama.Ollama', '#111111', 'Yerel LLM çalıştırıcı (asistan için)', false],
   ['lmstudio', 'LM Studio', 'ai', 'ElementLabs.LMStudio', '#4f46e5', 'Yerel model arayüzü', false],
 
@@ -90,13 +92,68 @@ const RAW = [
   ['putty', 'PuTTY', 'tools', 'PuTTY.PuTTY', '#3b3b98', 'SSH istemcisi', false],
 ];
 
+// Kurulu olup olmadığını anlamak için ek kurallar:
+//   family: aynı ürünün başka sürüm kimlikleri (ör. OpenJS.NodeJS.22 da "Node.js" sayılır)
+//   match : kayıt defterindeki görünen ad (regex)   files: kurulum kaydı bırakmayan araçlar
+const DETECT = {
+  vcredist: { match: /^Microsoft Visual C\+\+ 20(15|17|19|22).*(x64|\(x64\))/i },
+  dotnet: { family: 'Microsoft.DotNet.DesktopRuntime.', match: /^Microsoft Windows Desktop Runtime - (8|9|10)\./i },
+  '7zip': { match: /^7-Zip/i },
+  chrome: { match: /^Google Chrome$/i },
+  firefox: { family: 'Mozilla.Firefox', match: /^Mozilla Firefox/i },
+  brave: { match: /^Brave$/i },
+  node: { family: 'OpenJS.NodeJS', match: /^Node\.js/i },
+  vscode: { match: /^Microsoft Visual Studio Code/i },
+  git: { match: /^Git$|^Git version/i },
+  claudecode: { files: ['%USERPROFILE%/.local/bin/claude.exe', '%APPDATA%/npm/claude.cmd', '%LOCALAPPDATA%/Microsoft/WinGet/Links/claude.exe'] },
+  python: { family: 'Python.Python.3', match: /^Python 3\.\d+\.\d+ \(64-bit\)/i },
+  pwsh: { match: /^PowerShell 7/i },
+  ghcli: { match: /^GitHub CLI/i },
+  ghdesktop: { match: /^GitHub Desktop$/i },
+  cursor: { match: /^Cursor/i },
+  nvm: { match: /^NVM for Windows/i },
+  docker: { match: /^Docker Desktop/i },
+  postman: { match: /^Postman/i },
+  dotnetsdk: { family: 'Microsoft.DotNet.SDK.', match: /^Microsoft \.NET SDK/i },
+  jdk: { family: 'EclipseAdoptium.Temurin.', match: /^Eclipse Temurin JDK/i },
+  go: { match: /^Go Programming Language/i },
+  postgres: { family: 'PostgreSQL.PostgreSQL.', match: /^PostgreSQL \d+/i },
+  mysql: { match: /^MySQL Server/i },
+  openrgb: { match: /^OpenRGB/i, files: ['%ProgramFiles%/OpenRGB/OpenRGB.exe'] },
+  signalrgb: { match: /^SignalRGB/i },
+  ghub: { match: /^LGHUB|^Logitech G HUB/i },
+  icue: { family: 'Corsair.iCUE.', match: /^iCUE|^Corsair iCUE/i },
+  gcc: { match: /^GIGABYTE Control Center|^GCC/i },
+  claude: { match: /^Claude$/i },
+  ollama: { match: /^Ollama/i },
+  lmstudio: { match: /^LM Studio/i },
+  discord: { match: /^Discord$/i },
+  telegram: { match: /^Telegram Desktop/i },
+  slack: { match: /^Slack/i },
+  teams: { family: 'Microsoft.Teams', match: /^Microsoft Teams/i },
+  zoom: { match: /^Zoom/i },
+  spotify: { match: /^Spotify$/i },
+  vlc: { match: /^VLC media player/i },
+  obs: { match: /^OBS Studio/i },
+  steam: { match: /^Steam$/i },
+  notion: { match: /^Notion/i },
+  figma: { match: /^Figma/i },
+  powertoys: { match: /^PowerToys/i },
+  npp: { match: /^Notepad\+\+/i },
+  qbit: { match: /^qBittorrent/i },
+  winscp: { match: /^WinSCP/i },
+  putty: { match: /^PuTTY/i },
+};
+
 const BUILTIN = RAW.map(([key, name, category, wingetId, color, desc, recommended]) => ({
-  key, name, category, color, desc, recommended, source: 'winget', wingetId,
+  key, name, category, color, desc, recommended, source: 'winget', wingetId, ...(DETECT[key] || {}),
 }));
 
+/** Katalog + (envanter tarandıysa) her uygulamanın bu bilgisayardaki durumu */
 function getCatalog() {
   const custom = (store.get('customApps') || []).map((a) => ({ ...a, category: 'custom', custom: true }));
-  return { categories: CATEGORIES, apps: [...BUILTIN, ...custom] };
+  const apps = [...BUILTIN, ...custom].map((a) => ({ ...a, status: inventory.statusOf(a) }));
+  return { categories: CATEGORIES, apps, inventory: inventory.summary() };
 }
 
 function findByKeys(keys) {

@@ -200,11 +200,12 @@ class RGB extends EventEmitter {
     return {
       installed: !!this.client || !!this.findExe(),
       connected: !!this.client,
-      devices: this.devices.map((d) => ({ ...d, applied: this.applied.get(d.id) || null })),
+      devices: this.devices.map((d) => ({ ...d, applied: this.applied.get(d.id) || null, excluded: (store.get('ui')?.rgbExcluded || []).includes(d.key) })),
       effects: EFFECTS,
       presets: PRESETS,
       profiles: store.get('rgbProfiles') || [],
       active: st.global,
+      lastOn: st.lastOn || null,
       engine: store.get('settings').rgbEngine,
     };
   }
@@ -216,19 +217,50 @@ class RGB extends EventEmitter {
     if (!this.client) await this.connect();
     if (!this.client) throw new Error('OpenRGB bağlı değil');
     const p = normalize(profile);
-    const targets = deviceId == null ? [...this.raw.values()] : [this.raw.get(deviceId)].filter(Boolean);
+    // Genel uygulamada "senkrondan çıkarılmış" cihazlara dokunulmaz (kendi ayarlarında kalır)
+    const excluded = new Set(store.get('ui')?.rgbExcluded || []);
+    const targets = deviceId == null
+      ? [...this.raw.values()].filter((d) => !excluded.has(this.key(d)))
+      : [this.raw.get(deviceId)].filter(Boolean);
     const errors = [];
     for (const d of targets) {
       try { await this.applyToDevice(d, p); } catch (e) { errors.push(`${d.name}: ${e.message}`); log.error(`RGB uygulanamadı (${d.name})`, e); }
     }
     if (remember) {
       const st = store.get('rgbState') || { global: null, devices: {} };
-      if (deviceId == null) store.set('rgbState', { global: p, devices: {} });
+      if (deviceId == null) {
+        // Çıkarılmış cihazların kendi ayarları korunur; son "açık" görünüm Aç/Kapat için saklanır
+        const keep = Object.fromEntries(Object.entries(st.devices || {}).filter(([k]) => excluded.has(k)));
+        store.set('rgbState', { global: p, devices: keep, lastOn: p.effect === 'off' ? (st.lastOn || st.global) : p });
+      }
       else store.set('rgbState', { ...st, devices: { ...st.devices, [this.key(targets[0])]: { profile: p } } });
     }
     this.startLoop();
     this.emit('status');
     if (errors.length === targets.length && targets.length) throw new Error(errors[0]);
+    return this.status();
+  }
+
+  /** Işıkları kapatır ya da son açık görünüme döner */
+  async power(on) {
+    const st = store.get('rgbState') || {};
+    if (!on) return this.apply(PRESETS.find((x) => x.id === 'p_off'));
+    const back = st.lastOn || PRESETS[0];
+    return this.apply(back);
+  }
+
+  /** Cihazı genel görünümden çıkarır / geri ekler */
+  async setExcluded(deviceId, excluded) {
+    const d = this.raw.get(deviceId);
+    if (!d) throw new Error('Cihaz bulunamadı');
+    const k = this.key(d);
+    const list = new Set(store.get('ui')?.rgbExcluded || []);
+    if (excluded) list.add(k); else list.delete(k);
+    store.patch('ui', { rgbExcluded: [...list] });
+    // Geri eklenen cihaza mevcut genel görünümü uygula
+    const st = store.get('rgbState') || {};
+    if (!excluded && st.global) await this.apply(st.global, deviceId, { remember: false });
+    this.emit('status');
     return this.status();
   }
 
