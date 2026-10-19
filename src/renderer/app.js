@@ -936,7 +936,9 @@ window.__orbitErrors = 0;
 window.addEventListener('error', (e) => { window.__orbitErrors++; api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`); });
 window.addEventListener('unhandledrejection', (e) => { window.__orbitErrors++; api.app.log('error', 'Promise: ' + (e.reason?.stack || e.reason)); });
 
-(async function init() {
+// Açılış, TÜM betikler (lights.js, esp32.js) yüklendikten sonra başlar: aksi halde kayıtlı sayfa
+// (ör. ESP32) henüz tanımlanmamışken çizilmeye çalışılıyordu (yarış durumu).
+async function init() {
   S.settings = await api.settings.get();
   const ui = await api.ui.get().catch(() => ({}));
   if (ui.cat) S.cat = ui.cat;
@@ -961,4 +963,6 @@ window.addEventListener('unhandledrejection', (e) => { window.__orbitErrors++; a
   loadInstalled();
   S.pendingQueue = await api.install.pending().catch(() => []);
   runBootCheck();
-})();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
