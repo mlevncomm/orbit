@@ -184,7 +184,17 @@ class Installer extends EventEmitter {
       },
     });
     stopWatch();
-    const ex = U.explainExit(r.code);
+    let ex = U.explainExit(r.code);
+    if (ex.kind === 'needs-user') {
+      // Orbit yönetici olarak çalışır; bazı yükleyiciler (Spotify vb.) bunu reddeder → kullanıcı yetkisiyle yeniden dene
+      log.info(`${item.wingetId}: yönetici bağlamı reddedildi, normal kullanıcı olarak deneniyor`);
+      this.emitItem(item, { phase: 'install', percent: null, message: 'Yönetici bağlamı reddedildi · normal kullanıcı olarak kuruluyor…' });
+      const u = await runAsUser(['install', '--id', item.wingetId, '-e', '--source', 'winget', '--silent',
+        '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--scope', 'user']);
+      tail.push(...u.output.split(/\r?\n/).slice(-6));
+      ex = u.code == null ? { kind: 'error', text: u.error || 'Kullanıcı olarak çalıştırılamadı' } : U.explainExit(u.code);
+      if (ex.kind === 'needs-user') ex = { kind: 'error', text: 'Yükleyici kullanıcı bağlamında da çalışmadı' };
+    }
     if (ex.kind === 'error') {
       log.warn(`winget ${item.wingetId} çıkış ${U.hex(r.code)}: ${tail.join(' | ')}`);
       return { status: 'error', message: ex.text, error: `${ex.text} · ${U.hex(r.code)}` };
@@ -326,6 +336,49 @@ function watchDownload(wingetId, meta, onBytes) {
   return () => clearInterval(timer);
 }
 
+/**
+ * winget'i oturum açmış kullanıcı olarak, SINIRLI yetkiyle çalıştırır (yönetici bağlamını reddeden
+ * yükleyiciler için). Geçici bir zamanlanmış görev kullanılır ve iş bitince silinir.
+ * Argümanlar yalnızca sabit bayraklar + doğrulanmış winget kimliğidir.
+ * Dönüş: { code, output, error }
+ */
+async function runAsUser(args, { timeoutMs = 15 * 60 * 1000 } = {}) {
+  if (!args.every((a) => /^[A-Za-z0-9.+\-_]+$/.test(a))) return { code: null, output: '', error: 'Geçersiz argüman' };
+  const { runPS } = require('./ps');
+  const name = `Orbit-kullanici-kurulum-${Date.now()}`;
+  const out = path.join(os.tmpdir(), `${name}.txt`);
+  const q = (s) => s.replace(/'/g, "''");
+  const inner = `winget ${args.join(' ')} *> '${q(out)}'; Add-Content -LiteralPath '${q(out)}' ('EXIT:' + $LASTEXITCODE)`;
+  const encoded = Buffer.from(inner, 'utf16le').toString('base64');
+  const r = await runPS(`
+    $user = (Get-CimInstance Win32_ComputerSystem).UserName
+    if (-not $user) { 'NOUSER'; exit }
+    $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encoded}'
+    $p = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName '${name}' -Action $a -Principal $p -Settings $s -Force | Out-Null
+    Start-ScheduledTask -TaskName '${name}'
+    $deadline = (Get-Date).AddMilliseconds(${timeoutMs})
+    # Görev durumu "sırada"dan "çalışıyor"a gecikmeli geçebilir: bitişi sonuç dosyasındaki EXIT satırından anla
+    while ((Get-Date) -lt $deadline) {
+      if ((Test-Path -LiteralPath '${q(out)}') -and (Select-String -LiteralPath '${q(out)}' -Pattern '^EXIT:' -Quiet)) { break }
+      Start-Sleep -Milliseconds 700
+    }
+    Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false
+    'DONE'
+  `, { timeoutMs: timeoutMs + 60000 });
+  let output = '';
+  try {
+    // Windows PowerShell'in *> yönlendirmesi UTF-16 LE (BOM'lu) yazar
+    const buf = fs.readFileSync(out);
+    output = buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le').slice(1) : buf.toString('utf8');
+    fs.rmSync(out, { force: true });
+  } catch {}
+  if (r.stdout.includes('NOUSER')) return { code: null, output, error: 'Oturum açmış kullanıcı bulunamadı' };
+  const m = output.match(/EXIT:(-?\d+)/);
+  return m ? { code: parseInt(m[1], 10), output } : { code: null, output, error: r.stderr.split('\n')[0] || 'Görev sonucu okunamadı' };
+}
+
 /** Katalogdaki sabit doğrulama komutunu (kullanıcı girdisi DEĞİL) zaman aşımıyla çalıştırır */
 function runVerify(cmd) {
   return new Promise((resolve) => {
@@ -343,3 +396,4 @@ module.exports = new Installer();
 module.exports.runVerify = runVerify;
 module.exports.resolveInstaller = resolveInstaller;
 module.exports.watchDownload = watchDownload;
+module.exports.runAsUser = runAsUser;

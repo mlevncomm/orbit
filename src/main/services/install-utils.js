@@ -6,6 +6,7 @@ const hex = (code) => '0x' + (code >>> 0).toString(16).toUpperCase().padStart(8,
 const CODES = {
   '0x8A15002B': { kind: 'already', text: 'Zaten kurulu ve güncel' },
   '0x8A150061': { kind: 'already', text: 'Zaten kurulu' },
+  '0x8A150056': { kind: 'needs-user', text: 'Yükleyici yönetici yetkisiyle çalışmayı reddetti (ör. Spotify); normal kullanıcı olarak denenmeli' },
   '0x8A150109': { kind: 'reboot', text: 'Kuruldu, tamamlanması için yeniden başlatma gerekli' },
   '0x8A150014': { kind: 'error', text: 'Paket winget deposunda bulunamadı (kimlik değişmiş olabilir)' },
   '0x8A150008': { kind: 'error', text: 'Kurulum dosyası indirilemedi (internet bağlantısını kontrol et)' },

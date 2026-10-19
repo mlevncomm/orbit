@@ -57,3 +57,9 @@ test('parseShow: sürüm ve x64 kurulum adresi (gerçek winget show çıktısı)
   assert.deepEqual(U.parseShow('Bulundu\nSürüm: 3.0.24\n  Yükleyici Url: https://example.org/a.exe'), { version: '3.0.24', url: 'https://example.org/a.exe' });
   assert.deepEqual(U.parseShow('No package found'), { version: null, url: null });
 });
+
+test('0x8A150056: yönetici bağlamını reddeden yükleyici (gerçek Spotify vakası) → kullanıcı olarak dene', () => {
+  const e = U.explainExit(-1978335146);
+  assert.equal(U.hex(-1978335146), '0x8A150056');
+  assert.equal(e.kind, 'needs-user');
+});
