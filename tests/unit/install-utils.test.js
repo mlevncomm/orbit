@@ -45,3 +45,15 @@ test('extractVersion', () => {
   assert.equal(U.extractVersion('Python 3.13.1'), '3.13.1');
   assert.equal(U.extractVersion('bulunamadı'), null);
 });
+
+test('parseShow: sürüm ve x64 kurulum adresi (gerçek winget show çıktısı)', () => {
+  const out = [
+    'Found 7-Zip [7zip.7zip]', 'Version: 26.04', 'Publisher Url: https://7-zip.org/',
+    'Homepage: https://7-zip.org/download.html', 'Installers:',
+    '  Installer Type: wix', '  Installer Url: https://www.7-zip.org/a/7z2604.msi',
+    '  Installer Url: https://www.7-zip.org/a/7z2604-x64.msi',
+  ].join('\r\n');
+  assert.deepEqual(U.parseShow(out), { version: '26.04', url: 'https://www.7-zip.org/a/7z2604-x64.msi' });
+  assert.deepEqual(U.parseShow('Bulundu\nSürüm: 3.0.24\n  Yükleyici Url: https://example.org/a.exe'), { version: '3.0.24', url: 'https://example.org/a.exe' });
+  assert.deepEqual(U.parseShow('No package found'), { version: null, url: null });
+});

@@ -157,21 +157,33 @@ class Installer extends EventEmitter {
     let phase = 'download';
     const tail = [];
     this.emitItem(item, { phase, percent: null, message: 'Paket bilgisi alınıyor…' });
+    // winget, çıktısı yönlendirildiğinde indirme ilerlemesi YAZMIYOR (doğrulandı). Gerçek ilerleme için
+    // kurulum dosyasının boyutu resmi adresinden alınır ve winget'in geçici klasöründeki dosya izlenir.
+    const meta = await resolveInstaller(item.wingetId).catch(() => null);
+    const stopWatch = meta ? watchDownload(item.wingetId, meta, (bytes) => {
+      if (phase !== 'download' || !bytes) return;
+      const mb = (bytes / 1048576).toFixed(1);
+      this.emitItem(item, meta.size
+        ? { percent: Math.min(99, Math.round((bytes / meta.size) * 100)), message: `İndiriliyor ${mb} / ${(meta.size / 1048576).toFixed(1)} MB` }
+        : { percent: null, message: `İndiriliyor ${mb} MB (toplam boyut bilinmiyor)` });
+    }) : () => {};
+    // Yüzde yalnızca gerçekten bayt indiğinde gösterilir (zaten kuruluysa indirme hiç olmaz)
+    this.emitItem(item, { percent: null, message: `İndirme bekleniyor${meta?.version ? ' · v' + meta.version : ''}${meta?.size ? ' · ' + (meta.size / 1048576).toFixed(1) + ' MB' : ''}` });
+    const toInstall = () => {
+      if (phase !== 'download') return;
+      phase = 'install';
+      stopWatch();
+      this.emitItem(item, { phase, percent: null, message: 'Kuruluyor… (yükleyici ilerleme bildirmiyor)' });
+    };
     const r = await runProcess('winget', args, {
       onSpawn: (c) => (this.child = c),
       onChunk: (line) => {
         tail.push(line); if (tail.length > 12) tail.shift();
-        const p = U.parseProgress(line);
-        if (p && phase === 'download') {
-          return this.emitItem(item, { percent: p.percent, message: p.totalMB ? `İndiriliyor ${p.doneMB} / ${p.totalMB} MB` : `İndiriliyor %${p.percent}` });
-        }
-        // winget çıktısı Türkçe/İngilizce olabilir: kurulum aşamasına geçiş
-        if (phase === 'download' && /starting package install|installing|kurulum başlat|yükleniyor|paket yüklemesi/i.test(line)) {
-          phase = 'install';
-          this.emitItem(item, { phase, percent: null, message: 'Kuruluyor… (yükleyici ilerleme bildirmiyor)' });
-        }
+        // winget çıktısı Türkçe/İngilizce olabilir: indirme bitti / kurulum başladı
+        if (/verified installer hash|starting package install|installing|karma doğrula|kurulum başlat|yükleniyor|paket yüklemesi/i.test(line)) toInstall();
       },
     });
+    stopWatch();
     const ex = U.explainExit(r.code);
     if (ex.kind === 'error') {
       log.warn(`winget ${item.wingetId} çıkış ${U.hex(r.code)}: ${tail.join(' | ')}`);
@@ -266,6 +278,51 @@ class Installer extends EventEmitter {
   }
 }
 
+/**
+ * Paketin sürümünü ve resmi kurulum dosyası adresini `winget show` ile, boyutunu HEAD isteğiyle bulur.
+ * Dönüş: { version, url, size } (size bilinmiyorsa 0)
+ */
+async function resolveInstaller(wingetId) {
+  const r = await new Promise((resolve) => {
+    const p = spawn('winget', ['show', '--id', wingetId, '-e', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity'], { windowsHide: true });
+    let out = '';
+    const t = setTimeout(() => { try { p.kill(); } catch {} }, 45000);
+    p.stdout.on('data', (d) => (out += d));
+    p.on('close', () => { clearTimeout(t); resolve(out); });
+    p.on('error', () => { clearTimeout(t); resolve(''); });
+  });
+  const info = U.parseShow(r);
+  if (!info.version) return null;
+  let size = 0;
+  if (info.url) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const res = await fetch(info.url, { method: 'HEAD', redirect: 'follow', signal: ctl.signal });
+      size = +res.headers.get('content-length') || 0;
+    } catch {} finally { clearTimeout(t); }
+  }
+  return { ...info, size };
+}
+
+/** winget'in geçici indirme klasöründeki (%TEMP%\WinGet\<Kimlik>.<Sürüm>) dosya büyümesini izler */
+function watchDownload(wingetId, meta, onBytes) {
+  const dir = path.join(os.tmpdir(), 'WinGet', `${wingetId}.${meta.version}`);
+  const start = Date.now();
+  let last = -1;
+  const timer = setInterval(() => {
+    let bytes = 0;
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        const st = fs.statSync(path.join(dir, f));
+        if (st.isFile() && st.mtimeMs >= start - 2000) bytes += st.size;
+      }
+    } catch { return; }
+    if (bytes !== last) { last = bytes; onBytes(bytes); }
+  }, 400);
+  return () => clearInterval(timer);
+}
+
 /** Katalogdaki sabit doğrulama komutunu (kullanıcı girdisi DEĞİL) zaman aşımıyla çalıştırır */
 function runVerify(cmd) {
   return new Promise((resolve) => {
@@ -281,3 +338,5 @@ function runVerify(cmd) {
 
 module.exports = new Installer();
 module.exports.runVerify = runVerify;
+module.exports.resolveInstaller = resolveInstaller;
+module.exports.watchDownload = watchDownload;

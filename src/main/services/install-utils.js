@@ -64,4 +64,16 @@ function extractVersion(text) {
   return m ? m[1] : null;
 }
 
-module.exports = { explainExit, parseProgress, safeWingetId, safeNpmName, extractVersion, hex };
+/**
+ * `winget show` çıktısından sürümü ve kurulum dosyası adresini çıkarır (İngilizce/Türkçe etiketler).
+ * Birden çok "Installer Url" varsa (mimariye göre) x64 olanı tercih edilir.
+ */
+function parseShow(text) {
+  const lines = String(text).split(/\r?\n/).map((l) => l.replace(/^[\s\S]*\r/, ''));
+  const ver = lines.map((l) => l.match(/^\s*(?:Version|Sürüm)\s*:\s*(\S+)/i)).find(Boolean);
+  const urls = lines.map((l) => l.match(/^\s*(?:Installer Url|Yükleyici (?:URL|Url|Adresi))\s*:\s*(https:\/\/\S+)/i)).filter(Boolean).map((m) => m[1]);
+  const url = urls.find((u) => /x64|amd64|win64/i.test(u)) || urls[0] || null;
+  return { version: ver ? ver[1] : null, url };
+}
+
+module.exports = { explainExit, parseProgress, parseShow, safeWingetId, safeNpmName, extractVersion, hex };
