@@ -4,7 +4,18 @@ ESP32 kartının Orbit ile konuşmasını sağlayan firmware. Protokol: JSON Lin
 
 ## Durum
 
-- Kaynak kod hazır. **Bu bilgisayarda henüz derlenmedi ve karta yüklenmedi.**
+- **2026-10-19: COM3'teki karta yüklendi ve çift yönlü test edildi** (`npm run test:hardware`, 7/7).
+  Derleme: arduino-cli 1.5.1, esp32 core 3.3.12, ArduinoJson 7.4.3, `-DORBIT_LED_PIN=-1` (LED pini doğrulanmadı).
+- Yükleme notu: arduino-cli'nin paketlediği esptool 5.3.1 bu kartın CH340 köprüsüyle "Unable to verify flash chip
+  connection" hatası verdi; aynı dosyalar pip ile kurulan esptool 5.6.0 ile 460800 baud'da sorunsuz yüklendi:
+  ```powershell
+  py -3 -m esptool --chip esp32 --port COM3 --baud 460800 write-flash -z --flash-mode keep --flash-freq keep --flash-size keep `
+    0x1000 build\orbit-companion.ino.bootloader.bin 0x8000 build\orbit-companion.ino.partitions.bin `
+    0xe000 "$env:LOCALAPPDATA\Arduino15\packages\esp32\hardware\esp32\3.3.12\tools\partitions\boot_app0.bin" `
+    0x10000 build\orbit-companion.ino.bin
+  ```
+- **Eski programa geri dönmek için** (yedek `firmware/backups/`, git'e eklenmez; SHA-256 dosyası yanında):
+  `py -3 -m esptool --port COM3 --baud 460800 write-flash 0 firmware\backups\esp32-COM3-a0dd6ca36934-20261019-1606.bin`
 - COM3'teki kart esptool v5.6 ile doğrulandı (2026-10-19, salt okunur):
   **ESP32-D0WDQ6 rev v1.1**, çift çekirdek 240 MHz, Wi-Fi + BT, kristal 40 MHz, **4 MB flash**, USB köprüsü WCH CH340.
   Bu firmware bu çiple uyumlu (FQBN: `esp32:esp32:esp32`).

@@ -61,7 +61,7 @@ PAGES.esp32 = () => {
         <h3>Firmware</h3>
         ${dev ? `<div class="kv">
             <span>Firmware</span><b>${h(dev.fw)} v${h(dev.ver)}</b>
-            <span>Çip</span><b>${h(dev.chip || '?')} rev ${h(dev.rev ?? '?')} · ${h(dev.cores ?? '?')} çekirdek · ${h(dev.mhz ?? '?')} MHz</b>
+            <span>Çip</span><b>${h(dev.chip || '?')} rev ${h(dev.rev >= 100 ? `v${Math.floor(dev.rev / 100)}.${dev.rev % 100}` : dev.rev ?? '?')} · ${h(dev.cores ?? '?')} çekirdek · ${h(dev.mhz ?? '?')} MHz</b>
             <span>Flash</span><b>${dev.flash ? Math.round(dev.flash / 1048576) + ' MB' : '?'}</b>
             <span>MAC</span><b class="mono">${h(dev.mac || '?')}</b>
             <span>Yetenekler</span><b>${caps.map((c) => `<span class="badge">${h(c)}</span>`).join(' ') || '-'}</b>

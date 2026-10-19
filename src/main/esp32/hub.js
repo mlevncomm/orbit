@@ -29,22 +29,32 @@ $ErrorActionPreference = 'Stop'
 $sp = New-Object System.IO.Ports.SerialPort $env:ORBIT_PORT, ([int]$env:ORBIT_BAUD), 'None', 8, 'One'
 $sp.DtrEnable = $false; $sp.RtsEnable = $false; $sp.ReadTimeout = 50; $sp.WriteTimeout = 1000
 try { $sp.Open() } catch { [Console]::Out.WriteLine('E ' + $_.Exception.Message); exit 2 }
+# Seri okuma AYRI iş parçacığında: Windows PowerShell 5.1'de Console.In.ReadLineAsync gerçekte
+# eşzamanlı çalışır ve döngüyü bloke eder (yanıtlar ancak bir sonraki yazmada okunuyordu).
+$rs = [runspacefactory]::CreateRunspace(); $rs.Open(); $rs.SessionStateProxy.SetVariable('sp', $sp)
+$reader = [powershell]::Create(); $reader.Runspace = $rs
+[void]$reader.AddScript({
+  $buf = New-Object byte[] 4096
+  while ($sp.IsOpen) {
+    try {
+      $n = $sp.Read($buf, 0, $buf.Length)
+      if ($n -gt 0) { [Console]::Out.WriteLine('D ' + [Convert]::ToBase64String($buf, 0, $n)); [Console]::Out.Flush() }
+    } catch [System.TimeoutException] { }
+    catch { if ($sp.IsOpen) { [Console]::Out.WriteLine('E ' + $_.Exception.Message); [Console]::Out.Flush() }; break }
+  }
+})
+$job = $reader.BeginInvoke()
+# Okuyucu çalışmaya başladıktan sonra 'hazır' de: el sıkışma yanıtı kaçmasın
+while ($reader.InvocationStateInfo.State -ne 'Running') { Start-Sleep -Milliseconds 20 }
 [Console]::Out.WriteLine('O'); [Console]::Out.Flush()
-$in = [Console]::In; $pending = $in.ReadLineAsync(); $buf = New-Object byte[] 4096
 try {
   while ($true) {
-    if ($sp.BytesToRead -gt 0) {
-      $n = $sp.Read($buf, 0, [Math]::Min($buf.Length, $sp.BytesToRead))
-      if ($n -gt 0) { [Console]::Out.WriteLine('D ' + [Convert]::ToBase64String($buf, 0, $n)); [Console]::Out.Flush() }
-    } elseif ($pending.IsCompleted) {
-      $cmd = $pending.Result
-      if ($cmd -eq $null -or $cmd -eq 'Q') { break }
-      if ($cmd.StartsWith('W ')) { $b = [Convert]::FromBase64String($cmd.Substring(2)); $sp.Write($b, 0, $b.Length) }
-      $pending = $in.ReadLineAsync()
-    } else { Start-Sleep -Milliseconds 8 }
+    $cmd = [Console]::In.ReadLine()
+    if ($cmd -eq $null -or $cmd -eq 'Q') { break }
+    if ($cmd.StartsWith('W ')) { $b = [Convert]::FromBase64String($cmd.Substring(2)); $sp.Write($b, 0, $b.Length) }
   }
 } catch { [Console]::Out.WriteLine('E ' + $_.Exception.Message) }
-finally { if ($sp.IsOpen) { $sp.Close() } }
+finally { if ($sp.IsOpen) { $sp.Close() }; $reader.Stop(); $rs.Close() }
 `;
 
 const ALLOWED_COMMANDS = new Set(['led', 'ping', 'notify', 'info']); // ESP32'ye gönderilebilen komutlar
@@ -133,6 +143,8 @@ class Esp32Hub extends EventEmitter {
             const msg = line.slice(2);
             this.pushLog('err', msg);
             if (!opened) { clearTimeout(timer); reject(new Error(/denied|erişim|access/i.test(msg) ? `${this.port} başka bir program tarafından kullanılıyor (Arduino IDE seri monitörü açık olabilir)` : msg)); }
+            // Açıkken okuma hatası (ör. kablo çekildi): köprüyü kapat → 'exit' yeniden bağlanmayı başlatır
+            else { try { proc.kill(); } catch {} }
           }
         }
       });
