@@ -643,3 +643,14 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
 .log-line.out code { color: #8fd3ff; }
 .log-line.sys code { color: #b8a6ff; }
 .log-line.err code { color: #ff8a8a; }
+
+/* ---------- 1.5: sürücü yöneticisi ---------- */
+.table.wu td { vertical-align: top; }
+.cmp { display: inline-block; margin-top: 4px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 7px; background: var(--surface-2); color: var(--muted); }
+.cmp.vendor, .cmp.newer { background: var(--mint); color: #155c3f; }
+.cmp.older { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+.cmp.diff, .cmp.same { background: var(--butter); color: #6b5208; }
+.badge.fw { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+.fw-head { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); font-size: 12.5px; font-weight: 600; }
+.fw-row { opacity: .85; }
+:root[data-theme="dark"] .cmp.vendor, :root[data-theme="dark"] .cmp.newer { color: #9fe3c4; }

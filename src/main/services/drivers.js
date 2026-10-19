@@ -1,6 +1,7 @@
 // Sürücüler: 1) Windows Update sürücü kanalı (donanım kimliğine göre anakartın/cihazın onaylı sürücüleri)
 //            2) Üretici araçları (NVIDIA App, Intel DSA, AMD Adrenalin sayfası, anakart destek sayfası)
 const { runPS, runPSJson } = require('./ps');
+const DU = require('./driver-utils');
 
 const SEARCHER = `
   $session = New-Object -ComObject Microsoft.Update.Session
@@ -9,16 +10,66 @@ const SEARCHER = `
   $result = $searcher.Search("IsInstalled=0 and Type='Driver' and IsHidden=0")
 `;
 
-/** Windows Update üzerinden bu bilgisayara uygun, kurulmamış sürücüleri listeler. */
+/**
+ * Windows Update üzerinden bu bilgisayara uygun, kurulmamış sürücüleri listeler.
+ * Her güncelleme, DriverHardwareID ile cihazların donanım kimlik listesinde aranır: hangi cihaza
+ * gideceği ve o cihazın ŞU ANKİ sürücü sürümü tahminle değil kimlikle bulunur.
+ */
 async function scanWindowsUpdate() {
   const list = await runPSJson(`${SEARCHER}
-    @($result.Updates | ForEach-Object {
-      @{ id=$_.Identity.UpdateID; title=$_.Title; sizeMB=[math]::Round($_.MaxDownloadSize/1MB,1);
-         cls=$_.DriverClass; vendor=$_.DriverManufacturer; model=$_.DriverModel;
-         date=if($_.DriverVerDate){$_.DriverVerDate.ToString('yyyy-MM-dd')}else{$null} }
-    }) | ConvertTo-Json -Depth 3 -Compress
+    $drv = @{}
+    Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceID } | ForEach-Object { $drv[$_.DeviceID.ToUpper()] = $_ }
+    $ents = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.HardwareID })
+    $out = @()
+    foreach ($u in $result.Updates) {
+      $hw = [string]$u.DriverHardwareID
+      $devs = @()
+      foreach ($e in $ents) {
+        if (@(@($e.HardwareID) + @($e.CompatibleID) | Where-Object { $_ }) -contains $hw) {
+          $d = $drv[$e.PNPDeviceID.ToUpper()]
+          $devs += @{ name=$e.Name; id=$e.PNPDeviceID; version= if ($d) { $d.DriverVersion } else { $null }; provider= if ($d) { $d.DriverProviderName } else { $null } }
+        }
+      }
+      $out += @{ id=$u.Identity.UpdateID; title=$u.Title; sizeMB=[math]::Round($u.MaxDownloadSize/1MB,1);
+         cls=$u.DriverClass; vendor=$u.DriverManufacturer; provider=$u.DriverProvider; model=$u.DriverModel; hwId=$hw;
+         reboot=[int]$u.InstallationBehavior.RebootBehavior;
+         date=if($u.DriverVerDate){$u.DriverVerDate.ToString('yyyy-MM-dd')}else{$null}; devices=$devs }
+    }
+    ConvertTo-Json -InputObject @($out) -Depth 5 -Compress
   `, { timeoutMs: 10 * 60 * 1000 });
-  return [].concat(list || []);
+  return [].concat(list || []).map((u) => {
+    const devices = [].concat(u.devices || []);
+    const newVersion = DU.versionFromTitle(u.title);
+    const dev = devices.find((d) => d.version) || null;
+    return {
+      ...u, devices, newVersion, currentVersion: dev?.version || null, currentProvider: dev?.provider || null,
+      compare: DU.classifyUpdate(dev, u.provider, newVersion),
+      firmware: DU.isFirmwareUpdate(u),
+      hw: DU.parseHwId(u.hwId),
+      rebootText: DU.REBOOT_TEXT[u.reboot] || 'Bilinmiyor',
+    };
+  });
+}
+
+/**
+ * Sürücü kurulumundan önce sistem geri yükleme noktası oluşturur.
+ * Windows varsayılan olarak 24 saatte bir noktaya izin verir ve Sistem Koruması kapalıysa oluşturamaz:
+ * bu durumlar başarısızlık değil, kullanıcıya açıkça bildirilen sonuçlardır. Sistem Koruması
+ * Orbit tarafından kendiliğinden AÇILMAZ.
+ */
+async function createRestorePoint(description = 'Orbit: sürücü kurulumu öncesi') {
+  const r = await runPS(`
+    try {
+      $before = @(Get-ComputerRestorePoint -ErrorAction Stop).Count
+      Checkpoint-Computer -Description '${description.replace(/'/g, "''")}' -RestorePointType MODIFY_SETTINGS -WarningVariable w -ErrorAction Stop 3>$null
+      $after = @(Get-ComputerRestorePoint).Count
+      if ($after -gt $before) { 'CREATED' } elseif ($w) { 'SKIPPED|' + ($w | Select-Object -First 1) } else { 'SKIPPED|' }
+    } catch { 'FAILED|' + $_.Exception.Message }
+  `, { timeoutMs: 5 * 60 * 1000 });
+  const [kind, msg = ''] = r.stdout.trim().split(/\r?\n/).pop().split('|');
+  if (kind === 'CREATED') return { ok: true, status: 'created', message: 'Geri yükleme noktası oluşturuldu' };
+  if (kind === 'SKIPPED') return { ok: true, status: 'skipped', message: 'Geri yükleme noktası oluşturulmadı: son 24 saatte zaten bir nokta var (Windows sınırı)' };
+  return { ok: false, status: 'failed', message: /disabled|devre dışı|kapalı|not enabled/i.test(msg) ? 'Sistem Koruması kapalı: geri yükleme noktası oluşturulamadı' : `Geri yükleme noktası oluşturulamadı: ${msg.slice(0, 120)}` };
 }
 
 /**
@@ -30,7 +81,9 @@ async function installWindowsUpdate(ids, onProgress) {
   let reboot = false, failed = 0, installed = 0;
   const r = await runPS(`${SEARCHER}
     $want = ${filter}
-    $todo = @($result.Updates | Where-Object { $want -eq $null -or $want -contains $_.Identity.UpdateID })
+    # Toplu kurulumda (seçim yok) BIOS/UEFI/firmware ASLA kurulmaz; yalnızca açıkça seçilirse
+    $isFw = { param($u) ([string]$u.DriverClass -match '^firmware$') -or ($u.Title -match '\\b(BIOS|UEFI|firmware)\\b') }
+    $todo = @($result.Updates | Where-Object { ($want -eq $null -and -not (& $isFw $_)) -or ($want -ne $null -and $want -contains $_.Identity.UpdateID) })
     $i = 0
     foreach ($u in $todo) {
       $i++
@@ -130,7 +183,7 @@ async function installedDrivers(force = false) {
   const list = await runPSJson(`
     $want = @(${classes})
     @(Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceName -and $want -contains ([string]$_.DeviceClass).ToUpper() } |
-      ForEach-Object { @{ name=$_.DeviceName; cls=([string]$_.DeviceClass).ToUpper(); provider=$_.DriverProviderName; maker=$_.Manufacturer;
+      ForEach-Object { @{ name=$_.DeviceName; deviceId=$_.DeviceID; cls=([string]$_.DeviceClass).ToUpper(); provider=$_.DriverProviderName; maker=$_.Manufacturer;
         version=$_.DriverVersion; date=if($_.DriverDate){$_.DriverDate.ToString('yyyy-MM-dd')}else{''}; inf=$_.InfName } }) | ConvertTo-Json -Depth 3 -Compress
   `, { timeoutMs: 120000 });
   const now = Date.now();
@@ -144,10 +197,10 @@ async function installedDrivers(force = false) {
     .map((d) => {
       const generic = /^Microsoft$/i.test(d.provider || '');
       const ageMonths = d.date && !generic ? Math.max(0, Math.floor((now - new Date(d.date).getTime()) / (30.4 * 864e5))) : null;
-      return { ...d, group: DRIVER_CLASSES[d.cls] || d.cls, ageMonths, generic };
+      return { ...d, group: DRIVER_CLASSES[d.cls] || d.cls, ageMonths, generic, hw: DU.parseHwId(d.deviceId) };
     })
     .sort((a, b) => Object.keys(DRIVER_CLASSES).indexOf(a.cls) - Object.keys(DRIVER_CLASSES).indexOf(b.cls) || a.name.localeCompare(b.name));
   return driverCache;
 }
 
-module.exports = { scanWindowsUpdate, installWindowsUpdate, vendorRecommendations, installedDrivers };
+module.exports = { scanWindowsUpdate, installWindowsUpdate, vendorRecommendations, installedDrivers, createRestorePoint };

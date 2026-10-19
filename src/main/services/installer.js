@@ -238,14 +238,17 @@ class Installer extends EventEmitter {
   }
 
   async wuDrivers(item) {
-    this.emitItem(item, { phase: 'download', percent: null, message: 'Windows Update taranıyor (birkaç dakika sürebilir)…' });
+    this.emitItem(item, { phase: 'prepare', percent: null, message: 'Sistem geri yükleme noktası oluşturuluyor…' });
+    const rp = await drivers.createRestorePoint().catch((e) => ({ ok: false, message: e.message }));
+    log.info('Geri yükleme noktası: ' + rp.message);
+    this.emitItem(item, { phase: 'download', percent: null, message: `${rp.message} · Windows Update taranıyor…` });
     const res = await drivers.installWindowsUpdate(item.ids || [], (p) =>
       this.emitItem(item, { phase: p.stage === 'download' ? 'download' : 'install', percent: null, message: `${p.index}/${p.total} ${p.stage === 'download' ? 'indiriliyor' : 'kuruluyor'}: ${p.title}` }));
     if (res.reboot) item.reboot = true;
     if (!res.installed && !res.failed) return { status: 'skipped', message: 'Tüm sürücüler güncel', verified: true };
     return {
       status: res.failed && !res.installed ? 'error' : res.failed ? 'warn' : 'done',
-      message: `${res.installed} sürücü kuruldu${res.failed ? `, ${res.failed} başarısız` : ''}${res.reboot ? ' · yeniden başlatma gerekli' : ''}`,
+      message: `${res.installed} sürücü kuruldu${res.failed ? `, ${res.failed} başarısız` : ''}${res.reboot ? ' · yeniden başlatma gerekli' : ''} · ${rp.message}`,
       verified: !res.failed,
     };
   }

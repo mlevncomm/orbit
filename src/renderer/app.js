@@ -114,6 +114,10 @@ function navigate(page) {
 }
 
 function renderPage() {
+  if (typeof PAGES[S.page] !== 'function') {
+    api.app.log('error', `Geçersiz sayfa: ${JSON.stringify(S.page)} — panele dönülüyor`);
+    S.page = 'dashboard';
+  }
   $('#content').innerHTML = updateBanner() + PAGES[S.page]();
   hydrateIcons($('#content'));
   PAGES[S.page + 'After']?.();
@@ -310,15 +314,33 @@ PAGES.drivers = () => {
   if (S.scanning) wu = `<div class="empty"><span class="spinner"></span><p>Windows Update sorgulanıyor… (1-3 dakika)</p></div>`;
   else if (!S.wu) wu = `<div class="empty"><p>Donanım kimliklerine göre Microsoft'un onayladığı sürücüleri bulmak için tarayın.</p><button class="btn primary" data-action="scan-wu">${I('search')}Sürücüleri tara</button></div>`;
   else if (!S.wu.length) wu = `<div class="empty">${I('check', 28)}<p>Windows Update'te bekleyen sürücü yok. Hepsi güncel.</p><button class="btn sm" data-action="scan-wu">${I('refresh')}Tekrar tara</button></div>`;
-  else wu = `<table class="table"><thead><tr><th><input type="checkbox" data-wu-all ${S.wuSel.size === S.wu.length ? 'checked' : ''}></th><th>Sürücü</th><th>Sınıf</th><th>Tarih</th><th>Boyut</th></tr></thead><tbody>
-      ${S.wu.map((d) => `<tr><td><input type="checkbox" data-wu="${h(d.id)}" ${S.wuSel.has(d.id) ? 'checked' : ''}></td><td><b>${h(d.title)}</b><br><small class="sub">${h(d.vendor || '')}</small></td><td>${h(d.cls || '-')}</td><td>${h(d.date || '-')}</td><td>${d.sizeMB} MB</td></tr>`).join('')}
+  else {
+    const COMPARE = {
+      vendor: ['vendor', 'Genel sürücü yerine üretici sürücüsü'], newer: ['newer', 'Daha yeni sürüm'], same: ['same', 'Aynı sürüm'],
+      older: ['older', 'Daha eski sürüm'], different: ['diff', 'Farklı sağlayıcı (sürümler karşılaştırılamaz)'], unknown: ['', 'Eşleşen cihaz bulunamadı'],
+    };
+    const row = (d) => {
+      const [cls, txt] = COMPARE[d.compare] || COMPARE.unknown;
+      return `<tr class="${d.firmware ? 'fw-row' : ''}"><td><input type="checkbox" data-wu="${h(d.id)}" ${S.wuSel.has(d.id) ? 'checked' : ''}></td>
+        <td><b>${h(d.title)}</b><br><small class="sub mono">${h(d.hwId || '')}${d.hw?.vendor ? ' · ' + h(d.hw.vendor) : ''}</small>${d.firmware ? '<br><span class="badge fw">BIOS / firmware — ayrı onay</span>' : ''}</td>
+        <td>${d.devices.length ? d.devices.map((x) => `<b>${h(x.name)}</b>`).join('<br>') : '<span class="sub">—</span>'}</td>
+        <td>${d.currentVersion ? `<code>${h(d.currentVersion)}</code> <small class="sub">${h(d.currentProvider || '')}</small>` : '<span class="sub">—</span>'}<br>→ <code class="new">${h(d.newVersion || '?')}</code> <small class="sub">${h(d.provider || '')}</small><br><span class="cmp ${cls}">${h(txt)}</span></td>
+        <td>${h(d.date || '-')}<br><small class="sub">${d.sizeMB} MB · yeniden başlatma: ${h(d.rebootText || '?')}</small></td></tr>`;
+    };
+    const normal = S.wu.filter((d) => !d.firmware), fw = S.wu.filter((d) => d.firmware);
+    wu = `<table class="table wu"><thead><tr><th><input type="checkbox" data-wu-all ${normal.length && normal.every((d) => S.wuSel.has(d.id)) ? 'checked' : ''}></th><th>Sürücü</th><th>Hedef cihaz</th><th>Mevcut → yeni</th><th>Tarih</th></tr></thead><tbody>
+      ${normal.map(row).join('')}
+      ${fw.length ? `<tr><td colspan="5" class="fw-head">${I('alert', 14)} BIOS / UEFI / firmware güncellemeleri otomatik seçilmez; kurulum sırasında elektrik kesilirse kart açılmayabilir.</td></tr>${fw.map(row).join('')}` : ''}
     </tbody></table>
-    <div class="row" style="margin-top:12px"><span class="sub">${S.wuSel.size} / ${S.wu.length} seçili</span><span class="spacer"></span><button class="btn sm" data-action="scan-wu">${I('refresh')}Yeniden tara</button><button class="btn primary sm" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur</button></div>`;
+    <div class="row" style="margin-top:12px"><span class="sub">${S.wuSel.size} / ${S.wu.length} seçili · kurulumdan önce sistem geri yükleme noktası denenir</span><span class="spacer"></span><button class="btn sm" data-action="scan-wu">${I('refresh')}Yeniden tara</button><button class="btn primary sm" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur</button></div>`;
+  }
 
   const installedTable = !drv
     ? `<div class="empty"><span class="spinner"></span><p>Kurulu sürücüler okunuyor…</p></div>`
-    : `<table class="table drv"><thead><tr><th>Aygıt</th><th>Sağlayıcı</th><th>Sürüm</th><th>Tarih</th></tr></thead><tbody>
-      ${drv.map((d) => `<tr><td><span class="kicker">${h(d.group)}</span><br><b>${h(d.name)}</b></td><td>${h(d.provider || '-')}</td><td><code>${h(d.version)}</code></td>
+    : `<table class="table drv"><thead><tr><th>Aygıt</th><th>Donanım kimliği</th><th>Sağlayıcı</th><th>Sürüm</th><th>Tarih</th></tr></thead><tbody>
+      ${drv.map((d) => `<tr><td><span class="kicker">${h(d.group)}</span><br><b>${h(d.name)}</b></td>
+        <td>${d.hw?.vendorId ? `<span class="mono">${h(d.hw.bus)} ${h(d.hw.vendorId)}:${h(d.hw.deviceId || '----')}</span><br><small class="sub">${h(d.hw.vendor || 'bilinmeyen üretici')}</small>` : '<span class="sub">—</span>'}</td>
+        <td>${h(d.provider || '-')}</td><td><code>${h(d.version)}</code></td>
         <td><span class="age ${ageClass(d.ageMonths)}">${h(d.generic ? 'Temel sürücü!' : d.date || '-')}</span><br><small class="sub">${h(ageText(d.ageMonths))}</small></td></tr>`).join('')}
     </tbody></table>`;
   const old = (drv || []).filter((d) => d.ageMonths >= 24).length;
@@ -767,7 +789,7 @@ document.addEventListener('click', async (e) => {
   if (d.themeSet) return setTheme(d.themeSet);
   if (d.open) return safe(() => api.system.open(d.open));
   if (d.installRec) { const r = S.recs.find((x) => x.key === d.installRec); return startInstall([r], `${r.name} kur`); }
-  if (d.wuAll !== undefined) { S.wuSel = t.checked ? new Set(S.wu.map((x) => x.id)) : new Set(); return renderPage(); }
+  if (d.wuAll !== undefined) { S.wuSel = t.checked ? new Set(S.wu.filter((x) => !x.firmware).map((x) => x.id)) : new Set(); return renderPage(); }
   if (d.wu) { t.checked ? S.wuSel.add(d.wu) : S.wuSel.delete(d.wu); return renderPage(); }
   if (d.suggest) return sendChat(d.suggest);
   if (d.proposal) {
@@ -791,7 +813,14 @@ document.addEventListener('click', async (e) => {
     case 'toggle-feed': { const open = $('#app').classList.toggle('feed-open'); $('#scrim').classList.toggle('show', open); $('#bellDot').hidden = true; return; }
     case 'clear-feed': S.feed = []; return renderFeed();
     case 'scan-wu': return scanWU();
-    case 'install-wu': return startInstall([{ key: 'wu_drivers', name: 'Windows Update Sürücüleri', source: 'wudrivers', color: '#0078d4', ids: [...S.wuSel] }], `${S.wuSel.size} sürücüyü kur`);
+    case 'install-wu': {
+      const sel = S.wu.filter((d) => S.wuSel.has(d.id));
+      const fw = sel.filter((d) => d.firmware);
+      const lines = sel.map((d) => `• ${d.title}${d.devices[0] ? ' → ' + d.devices[0].name : ''}`).join('\n');
+      if (!confirm(`Şu sürücüler Windows Update'ten kurulacak:\n\n${lines}\n\nKurulumdan önce sistem geri yükleme noktası oluşturulmaya çalışılır (Windows 24 saatte bir izin verir; Sistem Koruması kapalıysa oluşturulamaz). Devam edilsin mi?`)) return;
+      if (fw.length && !confirm(`DİKKAT: ${fw.length} BIOS/firmware güncellemesi seçili. Kurulum sırasında elektrik kesilirse kart açılmayabilir. Bunları da kurmak istediğinden emin misin?`)) return;
+      return startInstall([{ key: 'wu_drivers', name: 'Windows Update Sürücüleri', source: 'wudrivers', color: '#0078d4', ids: [...S.wuSel] }], `${S.wuSel.size} sürücüyü kur`);
+    }
     case 'refresh-sys': S.sys = null; renderPage(); return loadSystem(true);
     case 'relaunch-admin': return safe(() => api.system.relaunchAdmin());
     case 'restart': return safe(() => api.system.restart()).then(() => toast('Bilgisayar 15 saniye içinde yeniden başlatılacak'));
@@ -855,7 +884,7 @@ async function scanWU() {
   const list = await safe(() => api.drivers.scan(), 'Tarama başarısız');
   S.scanning = false;
   if (list) {
-    S.wu = list; S.wuSel = new Set(list.map((x) => x.id));
+    S.wu = list; S.wuSel = new Set(list.filter((x) => !x.firmware).map((x) => x.id));
     pushFeed({ type: 'sys', text: list.length ? `${list.length} sürücü güncellemesi bulundu.` : 'Tüm sürücüler güncel.' });
   }
   renderPage();
