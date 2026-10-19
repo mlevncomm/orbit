@@ -17,7 +17,10 @@ const bootstrap = require('./services/bootstrap');
 const { Esp32Hub, identifyWithEsptool } = require('./esp32/hub');
 const esp32 = new Esp32Hub({ log });
 const { Automation } = require('./automation');
+const { Bridge } = require('./bridge');
 let automation = null;
+let bridge = null;
+const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'assistant', 'settings'];
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -255,7 +258,31 @@ function startAutomation() {
   automation.on('wifi', () => send('esp32:wifi', { wifi: automation.wifi, url: automation.panelUrl() }));
   automation.on('drivers', (list) => send('automation:drivers', list));
   automation.start();
+
+  // Claude / MCP için yerel köprü (varsayılan kapalı)
+  bridge = new Bridge({
+    userData: app.getPath('userData'), version: app.getVersion(), log, automation, inventory, drivers, rgb, hub: esp32, installer, store, catalog,
+    logDir: () => log.dir(),
+    uiState: async () => (win && !win.isDestroyed()
+      ? win.webContents.executeJavaScript(`({ page: S.page, theme: document.documentElement.dataset.theme, title: document.querySelector('h1')?.innerText || '', errors: window.__orbitErrors || 0, visible: !document.hidden })`)
+      : null),
+    navigate: async (page) => {
+      if (!UI_PAGES.includes(page)) throw new Error('Bilinmeyen sayfa: ' + page);
+      if (!win || win.isDestroyed()) createWindow();
+      await win.webContents.executeJavaScript(`navigate(${JSON.stringify(page)})`);
+    },
+    screenshot: async () => {
+      if (!win || win.isDestroyed()) throw new Error('Orbit penceresi yok');
+      if (!win.isVisible()) { win.showInactive(); await new Promise((r) => setTimeout(r, 600)); }
+      return (await win.webContents.capturePage()).toPNG();
+    },
+  });
+  if (store.get('settings').bridgeEnabled || process.env.ORBIT_BRIDGE === '1') bridge.start().catch((e) => log.warn('Köprü açılamadı', e));
 }
+handle('bridge:info', () => {
+  const plugin = app.isPackaged ? path.join(process.resourcesPath, 'plugins', 'orbit-mcp', 'index.js') : path.join(app.getAppPath(), 'plugins', 'orbit-mcp', 'index.js');
+  return { ...(bridge ? bridge.info() : { enabled: false }), plugin, command: `claude mcp add orbit -- node "${plugin}"` };
+});
 esp32.on('log', (e) => send('esp32:log', e));
 
 // ---------- Ayarlar (her değişiklik anında diske yazılır) ----------
@@ -268,6 +295,7 @@ async function setSettings(patch) {
   store.patch('settings', rest);
   store.flush();
   if ('startWithWindows' in rest) await applyStartup();
+  if ('bridgeEnabled' in rest && bridge) await (rest.bridgeEnabled ? bridge.start() : bridge.stop()).catch((e) => log.warn('Köprü', e));
   if ('rgbEngine' in rest) rgb.restore();
   if (rest.theme && win) {
     nativeTheme.themeSource = rest.theme;
@@ -371,5 +399,5 @@ if (!app.requestSingleInstanceLock()) {
     startAutomation();
   });
 }
-app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); esp32.disconnect(); });
+app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });
 app.on('window-all-closed', () => app.quit());

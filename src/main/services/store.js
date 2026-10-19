@@ -27,7 +27,8 @@ const DEFAULTS = {
       short: { action: 'lights.power', arg: 'toggle' },
       long: { action: 'lights.next', arg: '' },
     },
-    esp32Token: null,        // Wi-Fi paneli gizli anahtarı (Wi-Fi şifresi Orbit'te SAKLANMAZ)
+    esp32Token: null,
+    bridgeEnabled: false,    // Claude / MCP yerel köprüsü        // Wi-Fi paneli gizli anahtarı (Wi-Fi şifresi Orbit'te SAKLANMAZ)
   },
   ui: {                     // arayüz durumu (sayfa, filtreler, Panel seçenekleri…)
     page: 'dashboard',

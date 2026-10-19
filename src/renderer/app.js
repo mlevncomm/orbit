@@ -533,6 +533,8 @@ PAGES.settings = () => {
         <div class="row"><button class="btn" data-action="update-check">${I('refresh')}Güncellemeleri denetle</button>
           ${S.update.state === 'available' ? `<button class="btn primary" data-action="update-download">v${h(S.update.version)} indir</button>` : ''}
           ${S.update.state === 'ready' ? `<button class="btn primary" data-action="update-install">Yeniden başlat ve güncelle</button>` : ''}</div>
+        <label class="switch"><input type="checkbox" data-setting="bridgeEnabled" ${s.bridgeEnabled ? 'checked' : ''}><span>Claude bağlantısı (MCP eklentisi)<small>Yalnızca bu bilgisayardan, gizli anahtarla erişilen yerel köprü. Claude durumu okuyabilir, sayfaları test edebilir; kurulum gibi işlemler yine senin onayını ister.</small></span></label>
+        ${s.bridgeEnabled && S.bridgeInfo ? `<div class="panel-url"><span class="mono" style="font-size:11.5px">${h(S.bridgeInfo.command)}</span><button class="btn sm" data-action="copy-mcp">Kopyala</button></div><small class="sub">Bu komutu bir terminalde çalıştırınca Claude Code, Orbit'i araç olarak görür (Node.js gerekir).</small>` : ''}
         <div class="row"><button class="btn" data-action="open-logs">${I('terminal')}Günlük klasörü</button><button class="btn" data-open="https://github.com/mlevncomm/orbit/releases">${I('external')}Sürüm notları</button></div>
       </div>
     </div>
@@ -559,6 +561,7 @@ PAGES.settingsAfter = () => {
   key.addEventListener('change', saveKey);
   key.addEventListener('paste', () => setTimeout(saveKey, 50));
   if (!S.historyCache) safe(() => api.history.get()).then((hst) => { S.historyCache = hst || []; if (S.page === 'settings') renderPage(); });
+  api.bridge.info().then((b) => { const changed = JSON.stringify(b) !== JSON.stringify(S.bridgeInfo); S.bridgeInfo = b; if (changed && S.page === 'settings') renderPage(); }).catch(() => {});
 };
 
 function updateText() {
@@ -832,6 +835,7 @@ document.addEventListener('click', async (e) => {
       return;
     }
     case 'open-logs': return safe(() => api.app.openLogs());
+    case 'copy-mcp': try { await navigator.clipboard.writeText(S.bridgeInfo.command); toast('Komut kopyalandı'); } catch { toast('Kopyalanamadı', true); } return;
     case 'boot-check': return runBootCheck();
     case 'boot-toggle': S.bootOpen = !S.bootOpen; return renderPage();
     case 'resume-queue': {
@@ -928,8 +932,9 @@ api.onSettingsChanged((s) => {
 });
 
 // Arayüz hatalarını günlüğe yaz
-window.addEventListener('error', (e) => api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`));
-window.addEventListener('unhandledrejection', (e) => api.app.log('error', 'Promise: ' + (e.reason?.stack || e.reason)));
+window.__orbitErrors = 0;
+window.addEventListener('error', (e) => { window.__orbitErrors++; api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`); });
+window.addEventListener('unhandledrejection', (e) => { window.__orbitErrors++; api.app.log('error', 'Promise: ' + (e.reason?.stack || e.reason)); });
 
 (async function init() {
   S.settings = await api.settings.get();

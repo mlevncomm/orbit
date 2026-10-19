@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('orbit', {
     onDrivers: on('automation:drivers'),
   },
   onSettingsChanged: on('settings:changed'),
+  bridge: { info: () => call('bridge:info') },
   inventory: { get: (force) => call('inventory:get', force), onChanged: on('inventory:changed') },
   install: {
     run: (items) => call('install:run', items),

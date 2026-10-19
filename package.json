@@ -15,7 +15,8 @@
     "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1",
     "test": "node --test tests/unit/",
     "test:integration": "node --test --test-concurrency=1 tests/integration/",
-    "test:hardware": "node --test --test-concurrency=1 tests/hardware/"
+    "test:hardware": "node --test --test-concurrency=1 tests/hardware/",
+    "mcp": "node plugins/orbit-mcp/index.js"
   },
   "build": {
     "appId": "com.mlevn.orbit",
@@ -45,6 +46,12 @@
         "owner": "mlevncomm",
         "repo": "orbit",
         "releaseType": "release"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "plugins",
+        "to": "plugins"
       }
     ]
   },
