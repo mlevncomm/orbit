@@ -24,19 +24,35 @@ npm run dist       # dist/ altında Orbit-Setup-x.y.z.exe üretir (yayınlamadan
 | Profil | Seçimler otomatik kaydedilir; Ayarlar'dan JSON olarak dışa/içe aktarılır (format öncesi USB'ye) |
 | Asistan | Claude (Anthropic SDK, araç kullanımı) veya yerel Ollama |
 
+## Testler
+
+```bash
+npm test                  # birim testleri (donanım/ağ gerektirmez, sistemi değiştirmez)
+npm run test:integration  # gerçek sistemde SALT OKUNUR kontroller: winget, envanter, sürücüler, seri portlar
+```
+
+## ESP32
+
+`firmware/orbit-companion` — Orbit seri protokolünü (JSON Lines v1, `src/main/esp32/protocol.js`) konuşan firmware.
+Karta yükleme mevcut programı siler; Orbit bunu kendiliğinden yapmaz. Ayrıntı: `firmware/orbit-companion/README.md`.
+
 ## Klasör yapısı
 
 ```
 src/main/
   main.js              pencere, tepsi, IPC
   preload.js           window.orbit API köprüsü
-  services/            system, drivers, installer (kuyruk), catalog, rgb, updater, store, ps
+  services/            system, drivers, installer (kalıcı kuyruk + doğrulama), install-utils, bootstrap (format sonrası
+                       hazırlık), inventory, catalog (+ profiller), rgb, updater, store, log, ps
+  esp32/               protocol (JSON Lines v1), hub (seri köprü, el sıkışma, yeniden bağlanma, izinli komutlar)
   ai/
     assistant.js       sağlayıcı seçimi + sistem istemi
     tools.js           asistanın araçları  ← yeni yetenekler buraya register() ile
     providers/         anthropic.js, ollama.js
-src/renderer/          index.html, styles.css, app.js, lights.js, icons.js (bağımlılıksız)
+src/renderer/          index.html, styles.css, app.js, lights.js, esp32.js, icons.js (bağımlılıksız)
 src/assets/icon.png    uygulama ikonu (npm run icon ile yeniden üretilir)
+firmware/              ESP32 companion firmware
+tests/                 unit/, integration/, fixtures/ (gerçek cihaz verileri), helpers/
 ```
 
 ## Yeni sürüm yayınlamak

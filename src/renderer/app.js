@@ -11,6 +11,7 @@ const NAV = [
   { id: 'drivers', label: 'Sürücüler', icon: 'chip' },
   { id: 'apps', label: 'Programlar', icon: 'package' },
   { id: 'lights', label: 'Işıklar', icon: 'light' },
+  { id: 'esp32', label: 'ESP32', icon: 'usb' },
   { id: 'assistant', label: 'Asistan', icon: 'sparkles' },
   { id: 'settings', label: 'Ayarlar', icon: 'settings' },
 ];
@@ -143,6 +144,65 @@ function adminBanner() {
   return `<div class="banner">${I('shield')}<p><b>Yönetici izni yok.</b> Sessiz kurulum ve sürücü yüklemesi için Orbit'i yönetici olarak yeniden başlatın.</p><button class="btn primary sm" data-action="relaunch-admin">Yönetici olarak başlat</button></div>`;
 }
 
+/* ---------- Format sonrası hazırlık ---------- */
+const CHECK_ICON = { ok: 'check', warn: 'alert', fail: 'x' };
+const REPAIR_LABEL = { 'winget-install': "winget'i kur / onar", 'winget-source-reset': 'Kaynağı sıfırla', 'relaunch-admin': 'Yönetici olarak başlat' };
+
+function readinessCard() {
+  const b = S.boot;
+  const pending = S.pendingQueue?.length ? `<div class="banner">${I('refresh')}<p><b>Yarım kalan kurulum:</b> önceki oturumdan ${S.pendingQueue.length} öğe (${h(S.pendingQueue.slice(0, 4).map((x) => x.name).join(', '))}${S.pendingQueue.length > 4 ? '…' : ''}) bekliyor.</p>
+      <button class="btn primary sm" data-action="resume-queue">Devam et</button><button class="btn sm" data-action="discard-queue">Vazgeç</button></div>` : '';
+  if (!b) return pending + `<div class="card ready-card"><div class="row"><span class="spinner"></span><b>Sistem hazırlığı kontrol ediliyor…</b><span class="sub">winget, internet, paket kaynağı, disk</span></div></div>`;
+  const bad = b.checks.filter((c) => c.status !== 'ok');
+  return pending + `<div class="card ready-card ${b.ready ? (bad.length ? 'warn' : 'ok') : 'fail'}">
+    <div class="row"><span class="ready-ic">${I(b.ready ? (bad.length ? 'alert' : 'shield') : 'x', 18)}</span>
+      <div style="flex:1;min-width:200px"><b>${b.ready ? (bad.length ? 'Kuruluma hazır, dikkat edilecekler var' : 'Sistem kuruluma hazır') : 'Kurulum öncesi düzeltilmesi gerekenler var'}</b>
+      <div class="sub">${b.checks.filter((c) => c.status === 'ok').length}/${b.checks.length} kontrol geçti · ${new Date(b.at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div></div>
+      <button class="btn sm" data-action="boot-toggle">${S.bootOpen ? 'Gizle' : 'Ayrıntılar'}</button><button class="btn sm" data-action="boot-check" ${S.bootBusy ? 'disabled' : ''}>${S.bootBusy ? '<span class="spinner"></span>' : I('refresh')}Yeniden kontrol</button></div>
+    ${S.bootOpen || !b.ready ? `<div class="checks">${b.checks.map((c) => `<div class="check-row ${c.status}"><span>${I(CHECK_ICON[c.status], 14)}</span><b>${h(c.title)}</b><small>${h(c.detail)}</small>
+      ${c.fix ? `<button class="btn sm" data-repair="${c.fix}" ${S.bootBusy ? 'disabled' : ''}>${h(REPAIR_LABEL[c.fix] || 'Onar')}</button>` : '<span></span>'}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+async function runBootCheck() {
+  S.bootBusy = true; if (S.page === 'dashboard') renderPage();
+  S.boot = await safe(() => api.bootstrap.check(), 'Hazırlık kontrolü yapılamadı') || S.boot;
+  S.bootBusy = false; if (S.page === 'dashboard') renderPage();
+}
+
+async function runRepair(action) {
+  if (action === 'relaunch-admin') return safe(() => api.system.relaunchAdmin());
+  const text = action === 'winget-install'
+    ? "winget, Microsoft'un resmi PowerShell modülü (Microsoft.WinGet.Client) ile kurulacak/onarılacak. İnternetten indirme yapılır ve birkaç dakika sürebilir. Devam edilsin mi?"
+    : 'winget paket kaynakları sıfırlanıp yeniden indirilecek. Devam edilsin mi?';
+  if (!confirm(text)) return;
+  S.bootBusy = true; renderPage();
+  pushFeed({ type: 'sys', text: `Onarım başladı: ${REPAIR_LABEL[action]}` });
+  const r = await safe(() => api.bootstrap.repair(action), 'Onarım başarısız');
+  S.bootBusy = false;
+  if (r) { S.boot = r; pushFeed({ type: 'sys', text: 'Onarım bitti, kontrol yenilendi.' }); }
+  renderPage();
+}
+
+/** Hazır profil: kurulu olmayanları bulur */
+function profileState(p) {
+  const apps = p.keys.map((k) => S.catalog.apps.find((a) => a.key === k)).filter(Boolean);
+  const missing = apps.filter((a) => !isInstalled(a));
+  const updates = apps.filter((a) => a.status?.available);
+  return { apps, missing, updates };
+}
+
+function profilesRow() {
+  const list = S.catalog.profiles || [];
+  if (!list.length) return '';
+  return `<div class="profiles">${list.map((p) => {
+    const st = profileState(p);
+    return `<div class="profile-card"><div><b>${h(p.name)}</b><small>${h(p.desc)}</small>
+      <div class="sub">${st.apps.length - st.missing.length}/${st.apps.length} kurulu${st.updates.length ? ` · ${st.updates.length} güncelleme` : ''}${st.missing.length ? ` · eksik: ${h(st.missing.slice(0, 5).map((a) => a.name).join(', '))}${st.missing.length > 5 ? '…' : ''}` : ''}</div></div>
+      <button class="btn ${st.missing.length ? 'primary' : ''} sm" data-profile="${h(p.id)}" ${S.running || !st.missing.length ? 'disabled' : ''}>${I('download')}${st.missing.length ? `${st.missing.length} eksiği kur` : 'Hepsi kurulu'}</button></div>`;
+  }).join('')}</div>`;
+}
+
 PAGES.dashboard = () => {
   const sys = S.sys;
   const apps = selectedApps();
@@ -170,6 +230,7 @@ PAGES.dashboard = () => {
       <div><h1>Sıfırdan Başlayalım</h1><p>Format sonrası tek tıkla sürücüler ve programlar</p></div>
       ${hwChips()}
     </div>
+    ${readinessCard()}
     <div class="dash">
       <div class="tiles">
         ${tile('var(--lilac)', 'cpu', sys?.cpu.name || 'Algılanıyor…', sys ? `${sys.cpu.cores} çekirdek · ${sys.cpu.threads} iş parçacığı` : '', 'İşlemci')}
@@ -306,6 +367,7 @@ PAGES.apps = () => {
     <div class="page-head"><div><h1>Programlar</h1><p>Bu bilgisayarda ne kurulu, hangi sürümde, neyin güncellemesi var — hepsi tek yerde</p></div>
       <div class="row">${view === 'catalog' ? `<button class="btn" data-action="select-rec">${I('star')}Önerilenleri seç</button>` : ''}<button class="btn primary" data-action="add-app">${I('plus')}Program ekle</button></div></div>
     <div class="row inv-row">${invSummary()}</div>
+    ${(S.appsView || 'catalog') === 'catalog' ? profilesRow() : ''}
     <div class="toolbar">${tabs}<label class="search">${I('search')}<input id="appSearch" placeholder="${view === 'pc' ? 'Bu bilgisayarda ara…' : 'Program ara…'}" value="${h(S.query)}"></label></div>`;
 
   if (view === 'pc') {
@@ -493,10 +555,10 @@ function updateText() {
 
 /* ---------- Akış ---------- */
 function statusLabel(j) {
-  return { queued: 'Sırada', running: 'Kuruluyor', done: 'Tamamlandı', skipped: 'Zaten güncel', error: 'Hata', cancelled: 'İptal' }[j.status] || j.status;
+  return { queued: 'Sırada', running: { download: 'İndiriliyor', install: 'Kuruluyor', verify: 'Doğrulanıyor' }[j.phase] || 'Hazırlanıyor', done: 'Tamamlandı', skipped: 'Zaten güncel', warn: 'Doğrulanamadı', error: 'Hata', cancelled: 'İptal' }[j.status] || j.status;
 }
 function sourceLabel(a) {
-  return { winget: `winget · ${a.wingetId}`, url: 'Doğrudan indirme', npm: `npm · ${a.npmPkg}`, command: 'PowerShell komutu' }[a.source] || '';
+  return { winget: `winget · ${a.wingetId}`, url: 'Doğrudan indirme', npm: `npm · ${a.npmPkg}`, command: 'Komut (güvenlik nedeniyle artık desteklenmiyor)' }[a.source] || '';
 }
 
 function renderFeed() {
@@ -510,7 +572,12 @@ function renderFeed() {
         const color = j.color || '#555';
         return `<div class="msg"><span class="av">${I('download', 15)}</span><div class="bubble" style="padding:6px;min-width:220px">
           <div class="job ${j.status}"><div class="job-head"><span class="app-ic" style="background:${h(color)}">${h(initials(j.name || '?'))}</span><b>${h(j.name)}</b><span class="status-dot ${j.status}"></span></div>
-          <div class="bar"><i style="width:${['done', 'skipped', 'error'].includes(j.status) ? 100 : j.percent || 0}%"></i></div><small>${h(statusLabel(j))}${j.message ? ' · ' + h(j.message) : ''}</small></div></div></div>`;
+          ${j.status === 'running' && j.percent == null
+            ? '<div class="bar indet"><i></i></div>'
+            : `<div class="bar"><i style="width:${['done', 'skipped', 'error', 'warn'].includes(j.status) ? 100 : j.percent || 0}%"></i></div>`}
+          <small title="${h(j.error || j.message || '')}">${h(statusLabel(j))}${j.message ? ' · ' + h(j.message) : ''}</small>
+          ${['error', 'warn', 'cancelled'].includes(j.status) ? `<div class="job-actions"><button data-job-retry="${h(j.key)}">${I('refresh', 12)}Yeniden dene</button></div>` : ''}
+          ${j.status === 'queued' ? `<div class="job-actions"><button data-job-skip="${h(j.key)}">${I('x', 12)}Atla</button></div>` : ''}</div></div></div>`;
       }
       const me = f.type === 'me';
       return `<div class="msg ${me ? 'me' : ''}">${me ? '' : `<span class="av">${I('logo', 16)}</span>`}<div class="bubble"><div class="who"><span>${me ? 'Sen' : 'Orbit'}</span><span>${f.time}</span></div>${f.html || h(f.text)}</div></div>`;
@@ -528,12 +595,12 @@ async function startInstall(items, label) {
   if (!items.length) return toast('Kurulacak bir şey seçilmedi');
   items.forEach((it) => {
     const prev = S.jobs.get(it.key);
-    S.jobs.set(it.key, { key: it.key, name: it.name, color: it.color, status: 'queued', percent: 0, message: 'Sırada' });
+    S.jobs.set(it.key, { key: it.key, name: it.name, color: it.color, status: 'queued', percent: null, message: 'Sırada' });
     if (!prev || !S.feed.some((f) => f.type === 'job' && f.key === it.key)) pushFeed({ type: 'job', key: it.key });
     else { S.feed = S.feed.filter((f) => !(f.type === 'job' && f.key === it.key)); pushFeed({ type: 'job', key: it.key }); }
   });
   pushFeed({ type: 'me', text: label || `${items.length} öğeyi kur` });
-  const plain = items.map(({ key, name, source, wingetId, url, args, npmPkg, command, ids, color }) => ({ key, name, source, wingetId, url, args, npmPkg, command, ids, color }));
+  const plain = items.map(({ key, name, source, wingetId, url, args, npmPkg, ids, color }) => ({ key, name, source, wingetId, url, args, npmPkg, ids, color }));
   await safe(() => api.install.run(plain), 'Kurulum başlatılamadı');
 }
 
@@ -563,7 +630,7 @@ api.install.onState(async (st) => {
     const reboot = st.reboot || S.opts.reboot;
     pushFeed({
       type: 'sys',
-      html: `Kurulum bitti: <b>${st.done}</b> başarılı${st.failed ? `, <b style="color:var(--danger)">${st.failed}</b> hatalı` : ''}.${reboot ? `<div class="row" style="margin-top:8px"><button class="btn primary sm" data-action="restart">${I('power')}Yeniden başlat</button></div>` : ''}`,
+      html: `Kurulum bitti: <b>${st.done}</b> doğrulandı${st.warn ? `, <b style="color:var(--warn)">${st.warn}</b> doğrulanamadı` : ''}${st.failed ? `, <b style="color:var(--danger)">${st.failed}</b> hatalı` : ''}.${reboot ? `<div class="row" style="margin-top:8px"><button class="btn primary sm" data-action="restart">${I('power')}Yeniden başlat</button></div>` : ''}`,
     });
     if (S.opts.reboot && !st.failed) safe(() => api.system.restart());
     loadInstalled();
@@ -609,7 +676,7 @@ function openAddModal() {
   const draw = () => {
     root.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
       <div class="modal-head"><h3>Program ekle</h3><button class="icon-btn sm" data-action="close-overlays">${I('x')}</button></div>
-      <div class="seg" style="margin-bottom:14px">${[['winget', 'Katalogdan ara'], ['url', 'İndirme linki'], ['npm', 'npm paketi'], ['command', 'Komut']].map(([k, l]) => `<button type="button" class="${m.tab === k ? 'active' : ''}" data-mtab="${k}">${l}</button>`).join('')}</div>
+      <div class="seg" style="margin-bottom:14px">${[['winget', 'Katalogdan ara'], ['url', 'İndirme linki'], ['npm', 'npm paketi']].map(([k, l]) => `<button type="button" class="${m.tab === k ? 'active' : ''}" data-mtab="${k}">${l}</button>`).join('')}</div>
       <form class="form" id="addForm">
         ${m.tab === 'winget' ? `
           <div class="row"><input class="input" id="mq" placeholder="ör. obsidian, blender, unity" style="flex:1"><button type="button" class="btn primary" id="msearch">${m.searching ? '<span class="spinner"></span>' : I('search')}Ara</button></div>
@@ -618,7 +685,7 @@ function openAddModal() {
           ${m.tab === 'url' ? `<div class="field"><label>İndirme bağlantısı (.exe / .msi)</label><input class="input" name="url" required placeholder="https://…/setup.exe"></div>
             <div class="field"><label>Sessiz kurulum parametreleri</label><input class="input" name="args" placeholder="/S  (NSIS) · /VERYSILENT (Inno) · boş = .msi için /qn"><small>Kurulum dosyasının türüne göre değişir.</small></div>` : ''}
           ${m.tab === 'npm' ? `<div class="field"><label>Paket adı</label><input class="input" name="npmPkg" required placeholder="ör. typescript, @angular/cli"><small>npm install -g ile kurulur; Node.js gerekir.</small></div>` : ''}
-          ${m.tab === 'command' ? `<div class="field"><label>PowerShell komutu</label><textarea class="input" name="command" required placeholder="ör. wsl --install -d Ubuntu"></textarea><small>Yönetici yetkisiyle çalışır. Sadece güvendiğin komutları ekle.</small></div>` : ''}`}
+`}
         <div class="field"><label>Renk</label><input class="input" type="color" name="color" value="#6d5bd0" style="width:80px;padding:4px"></div>
         <div class="row"><span class="spacer"></span><button type="button" class="btn" data-action="close-overlays">Vazgeç</button><button class="btn primary" type="submit">${I('plus')}Ekle ve seç</button></div>
       </form></div>`;
@@ -646,7 +713,7 @@ function openAddModal() {
         if (!r) return toast('Listeden bir program seçin');
         def = { name: r.name, wingetId: r.id, source: 'winget', desc: `winget · ${r.id}`, color: f.color };
       } else {
-        def = { ...f, source: m.tab, desc: { url: 'Doğrudan indirme', npm: `npm · ${f.npmPkg}`, command: 'PowerShell komutu' }[m.tab] };
+        def = { ...f, source: m.tab, desc: { url: 'Doğrudan indirme', npm: `npm · ${f.npmPkg}` }[m.tab] };
         if (m.tab === 'url' && !/^https:\/\//i.test(f.url)) return toast('Bağlantı https:// ile başlamalı', true);
       }
       const item = await safe(() => api.catalog.addCustom(def));
@@ -668,7 +735,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade]');
+  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
   if (!t) return;
   const d = t.dataset;
 
@@ -685,6 +752,16 @@ document.addEventListener('click', async (e) => {
   if (d.dashTab) { S.dashTab = d.dashTab; saveUi({ dashTab: d.dashTab }); return renderPage(); }
   if (d.opt) { S.opts[d.opt] = !S.opts[d.opt]; saveUi({ opts: { ...S.opts } }); return renderPage(); }
   if (d.engine) { await saveSetting({ rgbEngine: d.engine }); return renderPage(); }
+  if (d.jobRetry) { const ok = await safe(() => api.install.retry(d.jobRetry)); if (!ok) toast('Yeniden denenemedi'); return; }
+  if (d.jobSkip) { await safe(() => api.install.skip(d.jobSkip)); return; }
+  if (d.repair) return runRepair(d.repair);
+  if (d.profile) {
+    const p = S.catalog.profiles.find((x) => x.id === d.profile);
+    const st = profileState(p);
+    if (!st.missing.length) return toast(`${p.name}: hepsi zaten kurulu`);
+    st.missing.forEach((a) => S.selection.add(a.key)); persistSelection();
+    return startInstall(st.missing, `${p.name}: ${st.missing.length} eksik program`).then(renderPage);
+  }
   if (d.appsView) { S.appsView = d.appsView; S.query = ''; saveUi({ appsView: d.appsView }); if (S.page !== 'apps') return navigate('apps'); return renderPage(); }
   if (d.upgrade) return startInstall([{ key: 'upg_' + d.upgrade, name: d.upgradeName || d.upgrade, source: 'winget', wingetId: d.upgrade, color: colorFor(d.upgradeName || d.upgrade) }], `${d.upgradeName || d.upgrade} güncelle`).then(renderPage);
   if (d.themeSet) return setTheme(d.themeSet);
@@ -726,6 +803,14 @@ document.addEventListener('click', async (e) => {
       return;
     }
     case 'open-logs': return safe(() => api.app.openLogs());
+    case 'boot-check': return runBootCheck();
+    case 'boot-toggle': S.bootOpen = !S.bootOpen; return renderPage();
+    case 'resume-queue': {
+      const items = S.pendingQueue || []; S.pendingQueue = [];
+      items.forEach((it) => { S.jobs.set(it.key, { ...it, status: 'queued', percent: null, message: 'Sırada' }); pushFeed({ type: 'job', key: it.key }); });
+      await safe(() => api.install.resume()); return renderPage();
+    }
+    case 'discard-queue': S.pendingQueue = []; await safe(() => api.install.discard()); return renderPage();
     case 'rescan': return loadInstalled(true);
     case 'reload-drivers': S.drivers = null; renderPage(); return loadDrivers(true);
     case 'upgrade-all': {
@@ -832,4 +917,6 @@ window.addEventListener('unhandledrejection', (e) => api.app.log('error', 'Promi
   renderPage(); renderFeed();
   loadSystem();
   loadInstalled();
+  S.pendingQueue = await api.install.pending().catch(() => []);
+  runBootCheck();
 })();

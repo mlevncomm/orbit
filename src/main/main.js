@@ -13,6 +13,9 @@ const assistant = require('./ai/assistant');
 const rgb = require('./services/rgb');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
+const bootstrap = require('./services/bootstrap');
+const { Esp32Hub } = require('./esp32/hub');
+const esp32 = new Esp32Hub({ log });
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -190,6 +193,31 @@ handle('drivers:installed', (force) => drivers.installedDrivers(force));
 // ---------- Kurulum ----------
 handle('install:run', (items) => installer.enqueue(items));
 handle('install:cancel', () => installer.cancel());
+handle('install:list', () => installer.list());
+handle('install:skip', (key) => installer.skip(key));
+handle('install:retry', (key) => installer.retry(key));
+handle('install:pending', () => installer.pendingFromLastRun());
+handle('install:resume', () => installer.resumePending());
+handle('install:discard', () => installer.discardPending());
+
+// ---------- Format sonrası hazırlık ----------
+handle('bootstrap:check', () => bootstrap.check());
+handle('bootstrap:repair', (action) => bootstrap.repair(action));
+
+// ---------- ESP32 Hub ----------
+handle('esp32:ports', () => esp32.listPorts());
+handle('esp32:status', () => esp32.status());
+handle('esp32:connect', (port, baud) => esp32.connect(port, baud));
+handle('esp32:disconnect', () => esp32.disconnect());
+handle('esp32:command', (cmd, args) => esp32.command(cmd, args));
+handle('esp32:read-status', () => esp32.readStatus());
+handle('esp32:raw', (text) => {
+  // Kullanıcının seri konsoldan yazdığı satır: yalnızca karta gider, bilgisayarda hiçbir şey çalıştırmaz
+  const line = String(text || '').replace(/[\r\n]/g, '').slice(0, 256);
+  esp32.writeRaw(line + '\n'); esp32.pushLog('out', line); return true;
+});
+esp32.on('status', (s) => send('esp32:status', s));
+esp32.on('log', (e) => send('esp32:log', e));
 
 // ---------- Ayarlar (her değişiklik anında diske yazılır) ----------
 const publicSettings = () => ({ ...store.get('settings'), hasApiKey: !!store.getApiKey() });
@@ -301,5 +329,5 @@ if (!app.requestSingleInstanceLock()) {
     inventory.get().catch((e) => log.warn('Envanter', e));
   });
 }
-app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); });
+app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); esp32.disconnect(); });
 app.on('window-all-closed', () => app.quit());

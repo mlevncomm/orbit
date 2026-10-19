@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "productName": "Orbit",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Format sonrası tek tıkla sürücü ve program kurulumu, RGB aydınlatma kontrolü ve kişisel AI asistanı",
   "main": "src/main/main.js",
   "author": "mlevncomm",
@@ -12,7 +12,9 @@
     "start": "electron .",
     "icon": "electron scripts/make-icon.js",
     "dist": "electron-builder --win --publish never",
-    "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
+    "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1",
+    "test": "node --test tests/unit/",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/"
   },
   "build": {
     "appId": "com.mlevn.orbit",

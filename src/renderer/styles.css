@@ -589,3 +589,57 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
 .eff span { line-height: 1.2; text-align: center; }
 .effects { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 @media (max-width: 1240px) { .effects { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---------- 1.4: kurulum kartları ---------- */
+.job .bar.indet { position: relative; }
+.job .bar.indet i { position: absolute; width: 35%; animation: indet 1.3s ease-in-out infinite; }
+@keyframes indet { 0% { left: -35%; } 100% { left: 100%; } }
+.job.warn .bar i { background: var(--warn); }
+.status-dot.warn { background: var(--warn); }
+.job-actions { display: flex; gap: 6px; margin-top: 8px; }
+.job-actions button { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 4px 9px; border-radius: 8px; background: rgba(127,127,127,.25); color: inherit; }
+.job-actions button:hover { background: rgba(127,127,127,.4); }
+
+/* ---------- 1.4: hazırlık kontrolü + profiller ---------- */
+.ready-card { margin-bottom: 12px; border-left: 4px solid var(--line); }
+.ready-card.ok { border-left-color: var(--success); }
+.ready-card.warn { border-left-color: var(--warn); }
+.ready-card.fail { border-left-color: var(--danger); }
+.ready-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); }
+.ready-card.ok .ready-ic { color: var(--success); }
+.ready-card.warn .ready-ic { color: var(--warn); }
+.ready-card.fail .ready-ic { color: var(--danger); }
+.checks { display: grid; gap: 6px; margin-top: 12px; }
+.check-row { display: grid; grid-template-columns: 22px minmax(140px, 220px) 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.check-row small { color: var(--muted); }
+.check-row.ok > span:first-child { color: var(--success); }
+.check-row.warn > span:first-child { color: var(--warn); }
+.check-row.fail > span:first-child { color: var(--danger); }
+.profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.profile-card { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 16px; border-radius: var(--r-md); background: linear-gradient(135deg, color-mix(in srgb, var(--lilac) 60%, var(--surface)), var(--surface)); box-shadow: var(--shadow); }
+.profile-card b { display: block; }
+.profile-card small { color: var(--muted); font-size: 12px; display: block; }
+@media (max-width: 760px) { .check-row { grid-template-columns: 22px 1fr; } .check-row small, .check-row .btn { grid-column: 2; } }
+
+/* ---------- 1.4: ESP32 Hub ---------- */
+.esp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.esp-grid .card.form { align-content: start; }
+.ports { display: grid; gap: 8px; }
+.port { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 2px solid transparent; cursor: pointer; }
+.port.sel { border-color: var(--black); }
+.port input { display: none; }
+.port-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--surface); }
+.port small { display: block; color: var(--muted); font-size: 12px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+.kv > span { color: var(--muted); }
+.note.warnbox, .note { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--butter); font-size: 12.5px; line-height: 1.5; }
+:root[data-theme="dark"] .note.warnbox { color: #f5e6b8; background: #3d331a; }
+.fw-help summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.fw-help ol { padding-left: 18px; font-size: 12.5px; line-height: 1.7; }
+.console { height: 280px; overflow-y: auto; background: #0e0e12; color: #d8d8e0; border-radius: 12px; padding: 8px 10px; font-size: 12px; }
+.log-line { display: grid; grid-template-columns: 64px 14px 1fr; gap: 6px; padding: 1px 0; }
+.log-line span { color: #6d6d78; }
+.log-line code { background: none; padding: 0; color: inherit; white-space: pre-wrap; word-break: break-all; }
+.log-line.out code { color: #8fd3ff; }
+.log-line.sys code { color: #b8a6ff; }
+.log-line.err code { color: #ff8a8a; }

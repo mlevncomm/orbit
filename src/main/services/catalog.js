@@ -39,6 +39,7 @@ const RAW = [
   ['cursor', 'Cursor', 'dev', 'Anysphere.Cursor', '#111111', 'AI destekli kod editörü', false],
 
   ['pnpm', 'pnpm', 'devplus', 'pnpm.pnpm', '#f69220', 'Hızlı paket yöneticisi', false],
+  ['vercel', 'Vercel CLI', 'devplus', null, '#000000', 'Vercel dağıtım aracı (npm -g vercel)', false],
   ['yarn', 'Yarn', 'devplus', 'Yarn.Yarn', '#2c8ebb', 'Paket yöneticisi', false],
   ['bun', 'Bun', 'devplus', 'Oven-sh.Bun', '#f4c6a6', 'Hızlı JS runtime', false],
   ['nvm', 'NVM for Windows', 'devplus', 'CoreyButler.NVMforWindows', '#5b8c3a', 'Node sürüm yöneticisi', false],
@@ -98,25 +99,25 @@ const RAW = [
 const DETECT = {
   vcredist: { match: /^Microsoft Visual C\+\+ 20(15|17|19|22).*(x64|\(x64\))/i },
   dotnet: { family: 'Microsoft.DotNet.DesktopRuntime.', match: /^Microsoft Windows Desktop Runtime - (8|9|10)\./i },
-  '7zip': { match: /^7-Zip/i },
+  '7zip': { match: /^7-Zip/i, files: ['%ProgramFiles%/7-Zip/7z.exe'] },
   chrome: { match: /^Google Chrome$/i },
   firefox: { family: 'Mozilla.Firefox', match: /^Mozilla Firefox/i },
   brave: { match: /^Brave$/i },
-  node: { family: 'OpenJS.NodeJS', match: /^Node\.js/i },
-  vscode: { match: /^Microsoft Visual Studio Code/i },
-  git: { match: /^Git$|^Git version/i },
-  claudecode: { files: ['%USERPROFILE%/.local/bin/claude.exe', '%APPDATA%/npm/claude.cmd', '%LOCALAPPDATA%/Microsoft/WinGet/Links/claude.exe'] },
-  python: { family: 'Python.Python.3', match: /^Python 3\.\d+\.\d+ \(64-bit\)/i },
-  pwsh: { match: /^PowerShell 7/i },
-  ghcli: { match: /^GitHub CLI/i },
+  node: { family: 'OpenJS.NodeJS', match: /^Node\.js/i, verify: 'node --version' },
+  vscode: { match: /^Microsoft Visual Studio Code/i, verify: 'code --version' },
+  git: { match: /^Git$|^Git version/i, verify: 'git --version' },
+  claudecode: { files: ['%USERPROFILE%/.local/bin/claude.exe', '%APPDATA%/npm/claude.cmd', '%LOCALAPPDATA%/Microsoft/WinGet/Links/claude.exe'], verify: 'claude --version' },
+  python: { family: 'Python.Python.3', match: /^Python 3\.\d+\.\d+ \(64-bit\)/i, verify: 'py -3 --version' },
+  pwsh: { match: /^PowerShell 7/i, verify: 'pwsh --version' },
+  ghcli: { match: /^GitHub CLI/i, verify: 'gh --version' },
   ghdesktop: { match: /^GitHub Desktop$/i },
   cursor: { match: /^Cursor/i },
   nvm: { match: /^NVM for Windows/i },
-  docker: { match: /^Docker Desktop/i },
+  docker: { match: /^Docker Desktop/i, verify: 'docker --version' },
   postman: { match: /^Postman/i },
-  dotnetsdk: { family: 'Microsoft.DotNet.SDK.', match: /^Microsoft \.NET SDK/i },
+  dotnetsdk: { family: 'Microsoft.DotNet.SDK.', match: /^Microsoft \.NET SDK/i, verify: 'dotnet --list-sdks' },
   jdk: { family: 'EclipseAdoptium.Temurin.', match: /^Eclipse Temurin JDK/i },
-  go: { match: /^Go Programming Language/i },
+  go: { match: /^Go Programming Language/i, verify: 'go version' },
   postgres: { family: 'PostgreSQL.PostgreSQL.', match: /^PostgreSQL \d+/i },
   mysql: { match: /^MySQL Server/i },
   openrgb: { match: /^OpenRGB/i, files: ['%ProgramFiles%/OpenRGB/OpenRGB.exe'] },
@@ -133,7 +134,7 @@ const DETECT = {
   teams: { family: 'Microsoft.Teams', match: /^Microsoft Teams/i },
   zoom: { match: /^Zoom/i },
   spotify: { match: /^Spotify$/i },
-  vlc: { match: /^VLC media player/i },
+  vlc: { match: /^VLC media player/i, files: ['%ProgramFiles%/VideoLAN/VLC/vlc.exe'] },
   obs: { match: /^OBS Studio/i },
   steam: { match: /^Steam$/i },
   notion: { match: /^Notion/i },
@@ -145,15 +146,36 @@ const DETECT = {
   putty: { match: /^PuTTY/i },
 };
 
+// winget dışındaki kaynaklar (resmi kurulum yöntemleri)
+const NPM = { vercel: { npmPkg: 'vercel', verify: 'vercel --version', files: ['%APPDATA%/npm/vercel.cmd'] } };
+DETECT.pnpm = { match: /^pnpm/i, verify: 'pnpm --version' };
+DETECT.bun = { match: /^Bun/i, verify: 'bun --version' };
+DETECT.rust = { match: /^Rustup/i, verify: 'rustup --version' };
+
 const BUILTIN = RAW.map(([key, name, category, wingetId, color, desc, recommended]) => ({
-  key, name, category, color, desc, recommended, source: 'winget', wingetId, ...(DETECT[key] || {}),
+  key, name, category, color, desc, recommended,
+  ...(NPM[key] ? { source: 'npm', ...NPM[key] } : { source: 'winget', wingetId }),
+  ...(DETECT[key] || {}),
 }));
+
+/**
+ * Hazır kurulum profilleri. Kurulu olanlar atlanır, eksikler kuyruğa girer.
+ * Supabase CLI bilinçli olarak yok: resmi olarak winget paketi ve global npm kurulumu desteklenmiyor
+ * (proje içinde `npx supabase` kullanılır).
+ */
+const PROFILES = [
+  {
+    id: 'developer', name: 'Developer Setup', desc: 'Yazılım geliştirme ortamı: editör, diller, sürüm kontrolü ve CLI araçları',
+    keys: ['chrome', 'git', 'ghcli', 'vscode', 'node', 'pnpm', 'python', 'pwsh', 'wterminal', 'vsbuild', 'dotnetsdk', 'vcredist', 'claudecode', 'docker', 'postman', '7zip', 'spotify', 'vercel'],
+  },
+  { id: 'essentials', name: 'Temel Paket', desc: 'Formattan sonra herkes için: tarayıcı, arşiv, çalışma zamanları, medya', keys: ['vcredist', 'dotnet', '7zip', 'chrome', 'vlc', 'powertoys'] },
+];
 
 /** Katalog + (envanter tarandıysa) her uygulamanın bu bilgisayardaki durumu */
 function getCatalog() {
   const custom = (store.get('customApps') || []).map((a) => ({ ...a, category: 'custom', custom: true }));
   const apps = [...BUILTIN, ...custom].map((a) => ({ ...a, status: inventory.statusOf(a) }));
-  return { categories: CATEGORIES, apps, inventory: inventory.summary() };
+  return { categories: CATEGORIES, apps, profiles: PROFILES, inventory: inventory.summary() };
 }
 
 function findByKeys(keys) {
