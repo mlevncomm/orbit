@@ -20,6 +20,25 @@ const { Automation } = require('./automation');
 const { Bridge } = require('./bridge');
 let automation = null;
 let bridge = null;
+let esp32UserDisconnected = false; // kullanıcı elle kestiyse otomatik bağlanma beklesin
+let esp32AutoBusy = false;
+
+/** Son kullanılan porta kendiliğinden bağlanır (açılışta ve kart sonradan takılınca) */
+async function autoConnectEsp32() {
+  const s = store.get('settings');
+  if (esp32AutoBusy || esp32UserDisconnected || s.esp32AutoConnect === false || !s.esp32LastPort || esp32.proc || esp32.state !== 'disconnected') return;
+  esp32AutoBusy = true;
+  try {
+    const ports = await esp32.listPorts();
+    if (ports.some((p) => p.port === s.esp32LastPort)) {
+      await esp32.connect(s.esp32LastPort, 115200);
+      log.info(`ESP32 otomatik bağlandı: ${s.esp32LastPort}`);
+    }
+  } catch (e) {
+    if (autoConnectEsp32.lastError !== e.message) log.warn('ESP32 otomatik bağlanamadı', e);
+    autoConnectEsp32.lastError = e.message;
+  } finally { esp32AutoBusy = false; }
+}
 const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'assistant', 'settings'];
 const { runPS } = require('./services/ps');
 
@@ -214,8 +233,8 @@ handle('bootstrap:repair', (action) => bootstrap.repair(action));
 // ---------- ESP32 Hub ----------
 handle('esp32:ports', () => esp32.listPorts());
 handle('esp32:status', () => esp32.status());
-handle('esp32:connect', (port, baud) => esp32.connect(port, baud));
-handle('esp32:disconnect', () => esp32.disconnect());
+handle('esp32:connect', (port, baud) => { esp32UserDisconnected = false; return esp32.connect(port, baud); });
+handle('esp32:disconnect', () => { esp32UserDisconnected = true; return esp32.disconnect(); });
 handle('esp32:command', (cmd, args) => esp32.command(cmd, args));
 handle('esp32:read-status', () => esp32.readStatus());
 handle('esp32:boards', () => store.get('esp32Boards') || {});
@@ -253,7 +272,13 @@ function startAutomation() {
     },
   });
   esp32.on('device-event', (ev) => automation.onDeviceEvent(ev).catch((e) => log.warn('ESP32 olayı', e)));
-  esp32.on('connected', () => automation.onConnected().catch(() => {}));
+  esp32.on('connected', () => {
+    store.patch('settings', { esp32LastPort: esp32.port });
+    autoConnectEsp32.lastError = null;
+    automation.onConnected().catch(() => {});
+  });
+  setTimeout(autoConnectEsp32, 3000);
+  setInterval(autoConnectEsp32, 20000);
   automation.on('history', (h) => send('automation:history', h));
   automation.on('wifi', () => send('esp32:wifi', { wifi: automation.wifi, url: automation.panelUrl() }));
   automation.on('drivers', (list) => send('automation:drivers', list));

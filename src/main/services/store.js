@@ -23,6 +23,8 @@ const DEFAULTS = {
     startWithWindows: true,  // RGB görünümünün açılışta geri gelmesi için varsayılan açık
     rgbEngine: 'hardware',   // 'hardware' (cihazın kendi efekti) | 'sync' (yazılım senkron)
     esp32LedAuto: true,      // ESP32 LED'i bilgisayarın durumunu yansıtsın
+    esp32AutoConnect: true,  // açılışta / kart takılınca son porta kendiliğinden bağlan
+    esp32LastPort: null,
     esp32Buttons: {          // BOOT tuşu → izinli eylem
       short: { action: 'lights.power', arg: 'toggle' },
       long: { action: 'lights.next', arg: '' },

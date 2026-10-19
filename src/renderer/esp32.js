@@ -35,6 +35,7 @@ function twinCards(dev) {
       <div class="card form">
         <h3>İkiz kontrol</h3>
         <p class="sub">Kart, Orbit'in durumunu 3 sn'de bir alır (ışıklar, kurulum kuyruğu, güncellemeler, CPU/RAM). Karttan gelen istekler yalnızca aşağıdaki <b>izin listesindeki</b> eylemleri tetikleyebilir.</p>
+        <label class="switch"><input type="checkbox" data-setting="esp32AutoConnect" ${s.esp32AutoConnect !== false ? 'checked' : ''}><span>Açılışta ve kart takılınca otomatik bağlan<small>Son bağlanılan port: ${h(s.esp32LastPort || 'henüz yok')}. Elle "Bağlantıyı kes" dersen, sen tekrar bağlanana kadar beklenir.</small></span></label>
         <label class="switch"><input type="checkbox" data-esp-ledauto ${s.esp32LedAuto !== false ? 'checked' : ''} ${dev && (dev.caps || []).includes('led') ? '' : 'disabled'}><span>Mavi LED bilgisayarı yansıtsın<small>Boşta: 3 sn'de bir kısa nabız · kurulum sürerken: hızlı yanıp sönme · Orbit kapalıyken: sönük</small></span></label>
         <div class="field"><label>BOOT tuşu — kısa bas</label><select class="input" data-esp-btn="short">${opt(btn.short)}</select></div>
         <div class="field"><label>BOOT tuşu — uzun bas (0,8 sn+)</label><select class="input" data-esp-btn="long">${opt(btn.long)}</select></div>
