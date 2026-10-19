@@ -42,6 +42,8 @@ const NATIVE = {
   wave: [/^color wave$/i, /^color shift$/i, /^visor$/i, /wave/i, /breath/i],
 };
 const ANIMATED = new Set(['breathing', 'pulse', 'spectrum', 'rainbow', 'wave']);
+// Donanım modunun efekti doğru renklerle gösterebilmesi için gereken en az renk sayısı
+const COLORS_NEEDED = { breathing: 1, pulse: 1, wave: 2 };
 
 const PRESETS = [
   { id: 'p_aurora', name: 'Aurora', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 3, brightness: 100 },
@@ -265,34 +267,49 @@ class RGB extends EventEmitter {
     const sync = store.get('settings').rgbEngine === 'sync';
     const direct = this.directMode(d);
     const animated = ANIMATED.has(p.effect);
+    const done = (method, mode, note = '') => this.applied.set(d.deviceId, { method, mode, effect: p.effect, note });
 
     // Senkron mod: Direct destekleyen cihazlarda tüm animasyonlar aynı saatle yazılımdan
-    if (sync && animated && direct) return this.startSoft(d, direct, p);
+    if (sync && animated && direct) { await this.startSoft(d, direct, p); return; }
 
-    let mode = this.findMode(d, p.effect);
-    if (mode) {
-      await this.setMode(d, mode, p);
-      this.applied.set(d.deviceId, { method: 'Donanım', mode: mode.name, effect: p.effect });
-      return;
+    // 1) Donanım modu — yalnızca seçilen renkleri BİREBİR gösterebiliyorsa.
+    //    (ör. Logitech "Wave" renk almaz, gökkuşağı gösterir; anakart "Breathing" tek renktir → dalga için uygun değil)
+    const mode = this.findMode(d, p.effect);
+    const need = COLORS_NEEDED[p.effect] || 0;
+    const fits = mode && (!need || (mode.colorMode === 2 && mode.colorMax >= need));
+    if (fits) { await this.setMode(d, mode, p); done('Donanım', mode.name); return; }
+
+    // 2) Akıcı yazılım animasyonu (yalnızca gerçek Direct modu olan cihazlar)
+    if (animated && direct) { await this.startSoft(d, direct, p); return; }
+
+    // 3) Sabit: renk / kapalı / animasyonsuz cihazlarda efektin renkleriyle tek seferlik geçiş.
+    //    Static > hafızaya kaydeden per-LED mod (RAM "Custom", klavye "Custom") > Direct
+    const perLed = d.modes.find((m) => m.colorMode === 1 && (m.flagList.includes('automaticSave') || m.flagList.includes('manualSave'))) || direct || d.modes.find((m) => m.colorMode === 1);
+    if (p.effect === 'wave' || p.effect === 'rainbow' || p.effect === 'spectrum') {
+      if (perLed) {
+        const n = d.colors.length;
+        const leds = Array.from({ length: n }, (_, i) => {
+          const t = n > 1 ? i / (n - 1) : 0;
+          return p.effect === 'wave' ? mix(hexToRgb(p.colors[0]), hexToRgb(p.colors[1]), t) : hsv(t * 300);
+        });
+        await this.setMode(d, perLed, p, leds);
+        done('Donanım', perLed.name, 'Bu cihaz renkli animasyonu desteklemiyor: renk geçişi sabit uygulandı');
+        return;
+      }
     }
-    if (animated && direct) return this.startSoft(d, direct, p);
-
-    // Sabit renk / kapalı ya da donanım karşılığı olmayan efekt:
-    // Static > cihaz hafızasına kaydeden per-LED mod (ör. RAM "Custom", tek seferlik yazma) > Direct
-    const persistent = d.modes.find((m) => m.colorMode === 1 && (m.flagList.includes('automaticSave') || m.flagList.includes('manualSave')));
-    mode = this.findMode(d, 'static') || persistent || direct || d.modes.find((m) => m.colorMode === 1);
-    if (!mode) throw new Error('Desteklenen mod yok');
-    const color = p.effect === 'off' ? { ...p, colors: ['#000000', '#000000'] } : p;
-    await this.setMode(d, mode, color);
-    const exact = ['static', 'off'].includes(p.effect);
-    this.applied.set(d.deviceId, { method: 'Donanım', mode: mode.name, effect: exact ? p.effect : 'static', note: exact ? '' : 'Bu cihazda bu efekt yok, sabit renk verildi' });
+    // Static modu renk almıyorsa (colorMax 0) setMode rengi LED'lere yazar
+    const target = (p.effect === 'off' && this.findMode(d, 'off')) || this.findMode(d, 'static') || perLed;
+    if (!target) throw new Error('Desteklenen mod yok');
+    await this.setMode(d, target, p.effect === 'off' ? { ...p, colors: ['#000000', '#000000'] } : p);
+    done('Donanım', target.name, ['static', 'off'].includes(p.effect) ? '' : 'Bu cihazda bu efekt yok: ilk renk sabit uygulandı');
   }
 
   /** Donanım modunu hız/parlaklık/renk ile ayarlar; manualSave destekliyorsa cihaza kaydeder. */
-  async setMode(d, mode, p) {
+  async setMode(d, mode, p, ledsOverride = null) {
     const flags = mode.flagList || [];
     const m = { id: mode.id };
-    const t = (p.speed - 1) / 9;
+    // Kaydırıcının üst ucu cihazın en yüksek hızının ~%70'i: donanımın en hızlı değerleri gözü yorar
+    const t = ((p.speed - 1) / 9) * 0.7;
     if (flags.includes('speed')) m.speed = lerp(mode.speedMin, mode.speedMax, t);
     const hasBri = flags.includes('brightness') && mode.brightnessMax !== mode.brightnessMin && mode.brightnessMax != null;
     if (hasBri) m.brightness = lerp(mode.brightnessMin, mode.brightnessMax, p.effect === 'off' ? 0 : p.brightness / 100);
@@ -307,7 +324,8 @@ class RGB extends EventEmitter {
     }
     await this.client.updateMode(d.deviceId, m);
     // Per-LED modlar (Direct/Custom/Static-colorMax=0) renkleri LED'lerden okur: tek seferlik yaz
-    if (mode.colorMode === 1 || (mode.colorMode === 2 && !mode.colorMax)) {
+    if (ledsOverride) this.client.updateLeds(d.deviceId, ledsOverride.map(tint));
+    else if (mode.colorMode === 1 || (mode.colorMode === 2 && !mode.colorMax)) {
       const c = p.effect === 'off' ? BLACK : tint(c1);
       this.client.updateLeds(d.deviceId, new Array(d.colors.length).fill(c));
     }
@@ -387,6 +405,20 @@ class RGB extends EventEmitter {
       }
       log.info('RGB görünümü geri yüklendi');
     } catch (e) { log.warn('RGB geri yüklenemedi', e); }
+  }
+
+  /** Arayüzdeki canlı şerit için: cihazların şu an gösterdiği renkler (en fazla 24 örnek) */
+  async live() {
+    if (!this.client) return [];
+    const hex = (c) => '#' + [c.red, c.green, c.blue].map((v) => v.toString(16).padStart(2, '0')).join('');
+    const list = await this.client.getAllControllerData();
+    return list.map((d) => {
+      const m = d.modes[d.activeMode];
+      const step = Math.max(1, Math.ceil(d.colors.length / 24));
+      // Donanım animasyonlarında LED renkleri cihaz çipinde hesaplanır; bu durumda mod renkleri gösterilir
+      const perLed = m.colorMode === 1 || (m.colorMode === 2 && !m.colorMax) || this.soft.has(d.deviceId);
+      return { id: d.deviceId, mode: m.name, hardwareAnim: !perLed, colors: perLed ? d.colors.filter((_, i) => i % step === 0).map(hex) : m.colors.map(hex) };
+    });
   }
 
   shutdown() { this.stopLoop(); clearTimeout(this.reconnectTimer); }

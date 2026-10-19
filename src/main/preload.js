@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('orbit', {
     refresh: () => call('rgb:refresh'),
     apply: (profile, deviceId) => call('rgb:apply', profile, deviceId),
     native: (deviceId, mode, opts) => call('rgb:native', deviceId, mode, opts),
+    live: () => call('rgb:live'),
     save: (p) => call('rgb:save', p).finally(() => ipcRenderer.send('tray:rebuild')),
     remove: (id) => call('rgb:delete', id).finally(() => ipcRenderer.send('tray:rebuild')),
     onStatus: on('rgb:status'),

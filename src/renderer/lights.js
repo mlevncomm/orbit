@@ -7,6 +7,9 @@ const L = {
   draft: { name: '', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 3, brightness: 100 },
   devColor: {},
   devMode: {},
+  liveApply: true,   // taslak değişince ışıklar anında güncellenir
+  pending: null,     // uygulama sürerken gelen son istek
+  liveTimer: null,
 };
 
 const DEVICE_ICON = { 'Klavye': 'keyboard', 'Fare': 'mouse', 'RAM': 'memory', 'Ekran Kartı': 'gpu', 'Anakart': 'board', 'Kasa': 'box', 'LED Şerit': 'light', 'Soğutucu': 'fan', 'Kulaklık': 'headphones' };
@@ -78,6 +81,7 @@ PAGES.lights = () => {
     <div class="dev">
       <div class="row" style="flex-wrap:nowrap"><span class="dev-ic">${I(DEVICE_ICON[dev.type] || 'chip')}</span>
         <div style="min-width:0;flex:1"><b>${h(dev.name)}</b><small>${h(dev.type)} · ${dev.leds} LED${dev.saves ? ' · ayar cihazda saklanır' : ''}</small></div></div>
+      <div class="live-strip" data-live="${dev.id}"></div>
       ${method || ap?.note ? `<div class="row">${method}${ap?.note ? `<small class="sub">${h(ap.note)}</small>` : ''}</div>` : ''}
       <div class="row">
         <select class="input sm" data-rgb-devmode="${dev.id}">${dev.modes.map((m) => `<option ${(L.devMode[dev.id] || ap?.mode || dev.activeMode) === m ? 'selected' : ''}>${h(m)}</option>`).join('')}</select>
@@ -102,6 +106,7 @@ PAGES.lights = () => {
         </div>`}
         ${['static', 'off'].includes(d.effect) ? '' : `<label class="field"><span class="sub">Hız · ${d.speed}/10</span><input type="range" min="1" max="10" value="${d.speed}" data-rgb-range="speed"></label>`}
         ${d.effect === 'off' ? '' : `<label class="field"><span class="sub">Parlaklık · %${d.brightness}</span><input type="range" min="5" max="100" step="5" value="${d.brightness}" data-rgb-range="brightness"></label>`}
+        <label class="switch"><input type="checkbox" id="rgbLive" ${L.liveApply ? 'checked' : ''}><span>Değiştirdikçe ışıklara uygula<small>Renk, efekt, hız ve parlaklık değişince tüm cihazlar anında güncellenir.</small></span></label>
         <div class="row"><input class="input" id="rgbName" placeholder="Profil adı (ör. Gece Modu)" value="${h(d.name)}" style="flex:1;min-width:160px">
           <button class="btn" data-rgb="save">${I('star')}Profil olarak kaydet</button>
           <button class="btn primary" data-rgb="apply-draft" ${dis}>${L.applying ? '<span class="spinner"></span>' : I('zap')}Tümüne uygula</button></div>
@@ -113,7 +118,9 @@ PAGES.lights = () => {
 
 PAGES.lightsAfter = () => {
   if (!L.status) rgbLoad(false).then(() => { if (L.status?.installed && !L.status.connected && !L.busy) autoConnect(); });
-  document.querySelectorAll('[data-rgb-c]').forEach((el) => el.addEventListener('input', () => { L.draft.colors[+el.dataset.rgbC] = el.value; refreshDraftPreview(); saveDraft(); }));
+  document.querySelectorAll('[data-rgb-c]').forEach((el) => {
+    el.addEventListener('input', () => { L.draft.colors[+el.dataset.rgbC] = el.value; refreshDraftPreview(); saveDraft(); liveApply(); });
+  });
   // Kaydırıcı sürüklenirken yalnızca önizleme güncellenir; cihaza komut gönderilmez
   document.querySelectorAll('[data-rgb-range]').forEach((el) => el.addEventListener('input', () => {
     L.draft[el.dataset.rgbRange] = +el.value;
@@ -121,6 +128,10 @@ PAGES.lightsAfter = () => {
     refreshDraftPreview();
     saveDraft();
   }));
+  // Kaydırıcı bırakılınca (change) uygula; sürüklerken komut gönderilmez
+  document.querySelectorAll('[data-rgb-range]').forEach((el) => el.addEventListener('change', liveApply));
+  const live = $('#rgbLive'); if (live) live.addEventListener('change', () => { L.liveApply = live.checked; saveUi({ rgbLiveApply: live.checked }); });
+  startLivePoll();
   document.querySelectorAll('[data-rgb-devcolor]').forEach((el) => el.addEventListener('input', () => (L.devColor[el.dataset.rgbDevcolor] = el.value)));
   document.querySelectorAll('[data-rgb-devmode]').forEach((el) => el.addEventListener('change', () => (L.devMode[el.dataset.rgbDevmode] = el.value)));
   const n = $('#rgbName'); if (n) n.addEventListener('input', () => { L.draft.name = n.value; saveDraft(); });
@@ -135,6 +146,40 @@ async function autoConnect() {
   L.busy = true; renderPage();
   await rgbLoad(true);
   L.busy = false; renderPage();
+}
+
+const liveApply = debounce(() => {
+  if (!L.liveApply || !L.status?.connected) return;
+  queueApply({ ...L.draft, name: L.draft.name || 'Özel görünüm', id: 'draft' });
+}, 350);
+
+/** Uygulama sürerken gelen istekleri birleştirir: yalnızca en sonuncusu uygulanır */
+async function queueApply(profile) {
+  if (L.applying) { L.pending = profile; return; }
+  L.applying = true;
+  try { L.status = await api.rgb.apply(profile); } catch (e) { toast(e.message, true); }
+  L.applying = false;
+  if (L.pending) { const next = L.pending; L.pending = null; return queueApply(next); }
+  if (S.page === 'lights' && !document.activeElement?.matches('input[type=color],input[type=range]')) renderPage();
+}
+
+/** Cihazların o an gösterdiği renkleri kartlardaki şeritte günceller */
+function startLivePoll() {
+  clearInterval(L.liveTimer);
+  if (!L.status?.connected) return;
+  const tick = async () => {
+    if (S.page !== 'lights') return clearInterval(L.liveTimer);
+    const list = await api.rgb.live().catch(() => null);
+    for (const d of list || []) {
+      const el = document.querySelector(`[data-live="${d.id}"]`);
+      if (!el) continue;
+      el.classList.toggle('hw', d.hardwareAnim);
+      el.title = d.hardwareAnim ? `${d.mode}: efekt cihazın kendi çipinde çalışıyor (mod renkleri gösteriliyor)` : 'Cihazdaki LED renkleri (canlı)';
+      el.innerHTML = (d.colors.length ? d.colors : ['#000000']).map((c) => `<i style="background:${c}"></i>`).join('') + (d.hardwareAnim ? `<em>${h(d.mode)}</em>` : '');
+    }
+  };
+  tick();
+  L.liveTimer = setInterval(tick, 900);
 }
 
 async function rgbRun(fn, okMsg) {
@@ -162,7 +207,7 @@ document.addEventListener('click', async (e) => {
     saveDraft();
     return rgbRun(() => api.rgb.apply(p), `“${p.name}” uygulandı`);
   }
-  if (d.rgbEff) { L.draft.effect = d.rgbEff; saveDraft(); return renderPage(); }
+  if (d.rgbEff) { L.draft.effect = d.rgbEff; saveDraft(); renderPage(); return liveApply(); }
   if (d.rgbNative) {
     const dev = L.status.devices.find((x) => x.id === +d.rgbNative);
     const mode = L.devMode[dev.id] || dev.applied?.mode || dev.activeMode;
@@ -191,4 +236,7 @@ api.install.onProgress((p) => {
 });
 api.rgb.onStatus((st) => { L.status = st; if (S.page === 'lights' && !L.applying) renderPage(); });
 // Kayıtlı taslak görünümü geri yükle
-api.ui.get().then((ui) => { if (ui?.lightsDraft) L.draft = { ...L.draft, ...ui.lightsDraft }; }).catch(() => {});
+api.ui.get().then((ui) => {
+  if (ui?.lightsDraft) L.draft = { ...L.draft, ...ui.lightsDraft };
+  if (typeof ui?.rgbLiveApply === 'boolean') L.liveApply = ui.rgbLiveApply;
+}).catch(() => {});

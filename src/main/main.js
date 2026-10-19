@@ -209,6 +209,7 @@ handle('rgb:status', () => rgb.status());
 handle('rgb:connect', () => rgb.connect());
 handle('rgb:refresh', async () => { await rgb.refresh(); return rgb.status(); });
 handle('rgb:apply', (profile, deviceId) => rgb.apply(profile, deviceId));
+handle('rgb:live', () => rgb.live());
 handle('rgb:native', (deviceId, mode, opts) => rgb.applyNative(deviceId, mode, opts));
 handle('rgb:save', (p) => rgb.saveProfile(p));
 handle('rgb:delete', (id) => rgb.deleteProfile(id));
