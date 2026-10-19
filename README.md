@@ -45,7 +45,7 @@ src/assets/icon.png    uygulama ikonu (npm run icon ile yeniden üretilir)
 2. PowerShell'de:
 
 ```powershell
-$env:GH_TOKEN = (gh auth token); npm run release
+npm run release   # veya: scripts\release.ps1 "Sürüm notları"
 ```
 
 Kurulu Orbit'ler bir sonraki denetimde yeni sürümü görür ve "Güncellemeyi indir" bandını gösterir.

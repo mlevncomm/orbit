@@ -1,29 +1,31 @@
-/* Işıklar (RGB) sayfası — app.js'deki S, PAGES, I, h, $ yardımcılarını kullanır */
+/* Işıklar (RGB) sayfası — app.js'deki S, PAGES, I, h, $, toast, saveUi, saveSetting yardımcılarını kullanır */
 const L = {
   status: null,
-  busy: false,
+  busy: false,       // bağlanıyor
+  applying: false,   // bir görünüm uygulanıyor
   error: '',
-  draft: { name: '', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 4, brightness: 100 },
+  draft: { name: '', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 3, brightness: 100 },
   devColor: {},
   devMode: {},
 };
 
 const DEVICE_ICON = { 'Klavye': 'keyboard', 'Fare': 'mouse', 'RAM': 'memory', 'Ekran Kartı': 'gpu', 'Anakart': 'board', 'Kasa': 'box', 'LED Şerit': 'light', 'Soğutucu': 'fan', 'Kulaklık': 'headphones' };
+const saveDraft = () => saveUi({ lightsDraft: { ...L.draft } });
 
-/** Efektin canlı CSS önizlemesi */
+/** Efektin canlı CSS önizlemesi (hız, cihazdaki döngü süresiyle aynı ölçekte) */
 function rgbPreview(p, tall) {
   const [a, b] = p.colors;
-  const dur = Math.max(0.6, 8 / (p.speed || 3)).toFixed(2) + 's';
-  const op = p.effect === 'off' ? 1 : Math.max(0.15, (p.brightness ?? 100) / 100);
+  const period = (16 - ((p.speed - 1) / 9) * 14).toFixed(2) + 's';
+  const op = p.effect === 'off' ? 1 : Math.max(0.12, Math.pow((p.brightness ?? 100) / 100, 0.8));
   let bg, anim = '';
   switch (p.effect) {
     case 'static': bg = a; break;
     case 'off': bg = '#16161a'; break;
-    case 'breathing': bg = a; anim = `rgbBreath ${dur} ease-in-out infinite`; break;
-    case 'pulse': bg = a; anim = `rgbPulse ${dur} ease-out infinite`; break;
-    case 'spectrum': bg = '#ff3b3b'; anim = `rgbHue ${dur} linear infinite`; break;
-    case 'rainbow': bg = 'linear-gradient(90deg,#ff3b3b,#ffb000,#3bff6b,#00d0ff,#7a3bff,#ff3bd0,#ff3b3b) 0 0/200% 100%'; anim = `rgbSlide ${dur} linear infinite`; break;
-    case 'wave': bg = `linear-gradient(90deg,${a},${b},${a}) 0 0/200% 100%`; anim = `rgbSlide ${dur} linear infinite`; break;
+    case 'breathing': bg = a; anim = `rgbBreath ${period} ease-in-out infinite`; break;
+    case 'pulse': bg = a; anim = `rgbPulse ${period} ease-out infinite`; break;
+    case 'spectrum': bg = '#ff3b3b'; anim = `rgbHue ${period} linear infinite`; break;
+    case 'rainbow': bg = 'linear-gradient(90deg,#ff3b3b,#ffb000,#3bff6b,#00d0ff,#7a3bff,#ff3bd0,#ff3b3b) 0 0/200% 100%'; anim = `rgbSlide ${period} linear infinite`; break;
+    case 'wave': bg = `linear-gradient(90deg,${a},${b},${a}) 0 0/200% 100%`; anim = `rgbSlide ${period} linear infinite`; break;
     default: bg = a;
   }
   return `<div class="rgb-prev ${tall ? 'tall' : ''}"><i style="background:${bg};animation:${anim};opacity:${op}"></i></div>`;
@@ -39,14 +41,16 @@ async function rgbLoad(connect) {
 
 PAGES.lights = () => {
   const st = L.status;
-  const head = `<div class="page-head"><div><h1>Işıklar</h1><p>Klavye, fare, kasa, RAM, anakart ve ekran kartı RGB'lerini tek yerden yönet</p></div>
-    <div class="row">${st?.connected ? `<span class="chip"><span class="status-dot done"></span>OpenRGB bağlı · ${st.devices.length} cihaz</span><button class="btn" data-rgb="refresh">${I('refresh')}Cihazları yenile</button>` : ''}</div></div>`;
+  const head = `<div class="page-head"><div><h1>Işıklar</h1><p>Klavye, fare, kasa, RAM, anakart ve ekran kartı RGB'leri</p></div>
+    <div class="row">${st?.connected ? `<span class="chip"><span class="status-dot done"></span>${st.devices.length} cihaz bağlı</span>
+      <div class="seg"><button class="${st.engine !== 'sync' ? 'active' : ''}" data-engine="hardware" title="Efekt cihazın kendi çipinde çalışır">Donanım</button><button class="${st.engine === 'sync' ? 'active' : ''}" data-engine="sync" title="Direct destekleyen cihazlar aynı saatle">Senkron</button></div>
+      <button class="btn" data-rgb="refresh">${I('refresh')}Yenile</button>` : ''}</div></div>`;
 
   if (!st) return head + `<div class="card empty"><span class="spinner"></span><p>RGB cihazları aranıyor…</p></div>`;
   if (!st.installed) {
     const job = S.jobs.get('openrgb');
     return head + `<div class="card empty" style="padding:40px">${I('light', 34)}<h3 style="margin-top:12px">RGB kontrolü için OpenRGB gerekli</h3>
-      <p>OpenRGB; Gigabyte RGB Fusion, ASUS Aura, MSI Mystic Light, Corsair, G.Skill, Kingston Fury RAM, Logitech, Razer, SteelSeries ve yüzlerce cihazı destekler. Orbit arka planda onu kullanarak efektleri çalıştırır.</p>
+      <p>OpenRGB; Gigabyte RGB Fusion, ASUS Aura, MSI Mystic Light, Corsair, G.Skill, Kingston Fury, Logitech, Razer, SteelSeries ve yüzlerce cihazı destekler. Orbit onu arka planda kullanır.</p>
       <button class="btn primary" data-rgb="install" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job) + ' · ' + (job.message || '')) : 'OpenRGB\'yi kur'}</button></div>`;
   }
   if (!st.connected) {
@@ -57,23 +61,31 @@ PAGES.lights = () => {
   }
 
   const active = st.active;
-  const preset = (p, mine) => `<button class="preset ${active && active.id === p.id ? 'on' : ''}" data-rgb-apply="${h(p.id)}">
+  const dis = L.applying ? 'disabled' : '';
+  const preset = (p, mine) => `<button class="preset ${active && active.id === p.id ? 'on' : ''}" data-rgb-apply="${h(p.id)}" ${dis}>
       ${rgbPreview(p)}<span class="pn"><b>${h(p.name)}</b><small>${h(st.effects[p.effect] || p.effect)}</small></span>
+      ${active && active.id === p.id ? `<span class="on-badge">${I('check', 12)}</span>` : ''}
       ${mine ? `<span class="del" data-rgb-del="${h(p.id)}" title="Sil">${I('trash', 14)}</span>` : ''}</button>`;
   const d = L.draft;
   const effChips = Object.entries(st.effects).map(([k, v]) => `<button class="${d.effect === k ? 'active' : ''}" data-rgb-eff="${k}">${v}</button>`).join('');
-  const twoColor = d.effect === 'wave';
-  const devices = st.devices.map((dev) => `
+  const twoColor = ['wave', 'breathing'].includes(d.effect);
+  const noColor = ['rainbow', 'spectrum', 'off'].includes(d.effect);
+
+  const devices = st.devices.map((dev) => {
+    const ap = dev.applied;
+    const method = ap ? `<span class="tag ${ap.method === 'Donanım' ? 'hw' : 'sw'}" title="${h(ap.note || '')}">${ap.method === 'Donanım' ? I('chip', 12) : I('zap', 12)} ${h(ap.method)} · ${h(ap.mode)}</span>` : '';
+    return `
     <div class="dev">
       <div class="row" style="flex-wrap:nowrap"><span class="dev-ic">${I(DEVICE_ICON[dev.type] || 'chip')}</span>
-        <div style="min-width:0;flex:1"><b>${h(dev.name)}</b><small>${h(dev.type)} · ${dev.leds} LED${dev.activeMode ? ' · ' + h(dev.activeMode) : ''}</small></div></div>
+        <div style="min-width:0;flex:1"><b>${h(dev.name)}</b><small>${h(dev.type)} · ${dev.leds} LED${dev.saves ? ' · ayar cihazda saklanır' : ''}</small></div></div>
+      ${method || ap?.note ? `<div class="row">${method}${ap?.note ? `<small class="sub">${h(ap.note)}</small>` : ''}</div>` : ''}
       <div class="row">
-        <input type="color" class="swatch" data-rgb-devcolor="${dev.id}" value="${L.devColor[dev.id] || '#ffffff'}">
-        <button class="btn sm" data-rgb-devapply="${dev.id}">Renk ver</button>
-        <select class="input sm" data-rgb-devmode="${dev.id}">${dev.modes.map((m) => `<option ${(L.devMode[dev.id] || dev.activeMode) === m ? 'selected' : ''}>${h(m)}</option>`).join('')}</select>
-        <button class="btn sm" data-rgb-native="${dev.id}" title="Cihazın kendi donanım efekti">Mod</button>
+        <select class="input sm" data-rgb-devmode="${dev.id}">${dev.modes.map((m) => `<option ${(L.devMode[dev.id] || ap?.mode || dev.activeMode) === m ? 'selected' : ''}>${h(m)}</option>`).join('')}</select>
+        <input type="color" class="swatch" data-rgb-devcolor="${dev.id}" value="${L.devColor[dev.id] || d.colors[0]}" title="Mod rengi">
+        <button class="btn sm" data-rgb-native="${dev.id}" ${dis}>Uygula</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   return head + `
     <div class="section-title" style="margin-top:0">Hazır görünümler</div>
@@ -84,52 +96,61 @@ PAGES.lights = () => {
         <h3>Kendi görünümünü oluştur</h3>
         ${rgbPreview(d, true)}
         <div class="seg wrap">${effChips}</div>
-        <div class="row">
-          <label class="field" style="flex:1"><span class="sub">Renk ${twoColor ? '1' : ''}</span><input type="color" class="swatch wide" data-rgb-c="0" value="${d.colors[0]}"></label>
+        ${noColor ? '' : `<div class="row">
+          <label class="field" style="flex:1"><span class="sub">${twoColor ? 'Renk 1' : 'Renk'}</span><input type="color" class="swatch wide" data-rgb-c="0" value="${d.colors[0]}"></label>
           ${twoColor ? `<label class="field" style="flex:1"><span class="sub">Renk 2</span><input type="color" class="swatch wide" data-rgb-c="1" value="${d.colors[1]}"></label>` : ''}
-        </div>
-        <label class="field"><span class="sub">Hız · ${d.speed}</span><input type="range" min="1" max="10" value="${d.speed}" data-rgb-range="speed"></label>
-        <label class="field"><span class="sub">Parlaklık · %${d.brightness}</span><input type="range" min="5" max="100" value="${d.brightness}" data-rgb-range="brightness"></label>
+        </div>`}
+        ${['static', 'off'].includes(d.effect) ? '' : `<label class="field"><span class="sub">Hız · ${d.speed}/10</span><input type="range" min="1" max="10" value="${d.speed}" data-rgb-range="speed"></label>`}
+        ${d.effect === 'off' ? '' : `<label class="field"><span class="sub">Parlaklık · %${d.brightness}</span><input type="range" min="5" max="100" step="5" value="${d.brightness}" data-rgb-range="brightness"></label>`}
         <div class="row"><input class="input" id="rgbName" placeholder="Profil adı (ör. Gece Modu)" value="${h(d.name)}" style="flex:1;min-width:160px">
-          <button class="btn" data-rgb="save">${I('star')}Kaydet</button><button class="btn primary" data-rgb="apply-draft">${I('zap')}Tümüne uygula</button></div>
+          <button class="btn" data-rgb="save">${I('star')}Profil olarak kaydet</button>
+          <button class="btn primary" data-rgb="apply-draft" ${dis}>${L.applying ? '<span class="spinner"></span>' : I('zap')}Tümüne uygula</button></div>
       </div>
-      <div class="card"><h3>Cihazlar</h3><p class="sub" style="margin-bottom:12px">Tek bir cihaza renk ya da donanım modu ver</p>
-        <div class="devs">${devices || '<div class="empty">OpenRGB cihaz bulamadı. RAM / anakart için yönetici olarak çalıştırın, sonra "Cihazları yenile".</div>'}</div></div>
+      <div class="card"><h3>Cihazlar</h3><p class="sub" style="margin-bottom:12px">Her cihaza kendi donanım modunu ve rengini ayrı ver. Seçimin hatırlanır.</p>
+        <div class="devs">${devices || '<div class="empty">OpenRGB cihaz bulamadı. RAM / anakart için yönetici olarak çalıştırın, sonra "Yenile".</div>'}</div></div>
     </div>`;
 };
+
 PAGES.lightsAfter = () => {
   if (!L.status) rgbLoad(false).then(() => { if (L.status?.installed && !L.status.connected && !L.busy) autoConnect(); });
-  document.querySelectorAll('[data-rgb-c]').forEach((el) => el.addEventListener('input', () => { L.draft.colors[+el.dataset.rgbC] = el.value; refreshDraftPreview(); }));
+  document.querySelectorAll('[data-rgb-c]').forEach((el) => el.addEventListener('input', () => { L.draft.colors[+el.dataset.rgbC] = el.value; refreshDraftPreview(); saveDraft(); }));
+  // Kaydırıcı sürüklenirken yalnızca önizleme güncellenir; cihaza komut gönderilmez
   document.querySelectorAll('[data-rgb-range]').forEach((el) => el.addEventListener('input', () => {
     L.draft[el.dataset.rgbRange] = +el.value;
-    el.previousElementSibling.textContent = el.dataset.rgbRange === 'speed' ? `Hız · ${el.value}` : `Parlaklık · %${el.value}`;
+    el.previousElementSibling.textContent = el.dataset.rgbRange === 'speed' ? `Hız · ${el.value}/10` : `Parlaklık · %${el.value}`;
     refreshDraftPreview();
+    saveDraft();
   }));
   document.querySelectorAll('[data-rgb-devcolor]').forEach((el) => el.addEventListener('input', () => (L.devColor[el.dataset.rgbDevcolor] = el.value)));
   document.querySelectorAll('[data-rgb-devmode]').forEach((el) => el.addEventListener('change', () => (L.devMode[el.dataset.rgbDevmode] = el.value)));
-  const n = $('#rgbName'); if (n) n.addEventListener('input', () => (L.draft.name = n.value));
+  const n = $('#rgbName'); if (n) n.addEventListener('input', () => { L.draft.name = n.value; saveDraft(); });
 };
+
 function refreshDraftPreview() {
   const box = document.querySelector('.form .rgb-prev.tall');
   if (box) box.outerHTML = rgbPreview(L.draft, true);
 }
+
 async function autoConnect() {
   L.busy = true; renderPage();
   await rgbLoad(true);
   L.busy = false; renderPage();
 }
-async function rgbApply(profile, deviceId) {
+
+async function rgbRun(fn, okMsg) {
+  if (L.applying) return;
+  L.applying = true; renderPage();
   try {
-    await api.rgb.apply(profile, deviceId ?? null);
-    if (deviceId == null) L.status = await api.rgb.status();
-    toast(deviceId == null ? `“${profile.name || 'Görünüm'}” uygulandı` : 'Cihaza uygulandı');
-    renderPage();
+    L.status = await fn();
+    if (okMsg) toast(okMsg);
   } catch (e) { toast(e.message, true); }
+  L.applying = false;
+  if (S.page === 'lights') renderPage();
 }
 
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-rgb],[data-rgb-apply],[data-rgb-del],[data-rgb-eff],[data-rgb-devapply],[data-rgb-native]');
-  if (!t) return;
+  const t = e.target.closest('[data-rgb],[data-rgb-apply],[data-rgb-del],[data-rgb-eff],[data-rgb-native]');
+  if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.rgbDel) {
     e.stopPropagation();
@@ -138,13 +159,15 @@ document.addEventListener('click', async (e) => {
   if (d.rgbApply) {
     const p = [...L.status.presets, ...L.status.profiles].find((x) => x.id === d.rgbApply);
     L.draft = { ...L.draft, effect: p.effect, colors: [...p.colors], speed: p.speed, brightness: p.brightness };
-    return rgbApply(p);
+    saveDraft();
+    return rgbRun(() => api.rgb.apply(p), `“${p.name}” uygulandı`);
   }
-  if (d.rgbEff) { L.draft.effect = d.rgbEff; return renderPage(); }
-  if (d.rgbDevapply) return rgbApply({ effect: 'static', colors: [L.devColor[d.rgbDevapply] || '#ffffff', '#000000'], speed: 1, brightness: 100 }, +d.rgbDevapply);
+  if (d.rgbEff) { L.draft.effect = d.rgbEff; saveDraft(); return renderPage(); }
   if (d.rgbNative) {
     const dev = L.status.devices.find((x) => x.id === +d.rgbNative);
-    return rgbApply({ native: L.devMode[dev.id] || dev.activeMode }, dev.id);
+    const mode = L.devMode[dev.id] || dev.applied?.mode || dev.activeMode;
+    const color = L.devColor[dev.id] || L.draft.colors[0];
+    return rgbRun(() => api.rgb.native(dev.id, mode, { colors: [color, L.draft.colors[1]], speed: L.draft.speed, brightness: L.draft.brightness }), `${dev.name}: ${mode}`);
   }
   switch (d.rgb) {
     case 'install': {
@@ -153,8 +176,8 @@ document.addEventListener('click', async (e) => {
       return renderPage();
     }
     case 'connect': return autoConnect();
-    case 'refresh': L.status = await api.rgb.refresh().catch((er) => { toast(er.message, true); return L.status; }); return renderPage();
-    case 'apply-draft': return rgbApply({ ...L.draft, name: L.draft.name || 'Özel görünüm', id: 'draft' });
+    case 'refresh': return rgbRun(() => api.rgb.refresh());
+    case 'apply-draft': return rgbRun(() => api.rgb.apply({ ...L.draft, name: L.draft.name || 'Özel görünüm', id: 'draft' }), 'Görünüm uygulandı');
     case 'save': {
       const p = await api.rgb.save({ ...L.draft, name: L.draft.name || 'Profilim' });
       L.status = await api.rgb.status(); toast(`“${p.name}” kaydedildi`); return renderPage();
@@ -166,4 +189,6 @@ document.addEventListener('click', async (e) => {
 api.install.onProgress((p) => {
   if (p.key === 'openrgb' && ['done', 'skipped'].includes(p.status)) { L.status = null; if (S.page === 'lights') renderPage(); }
 });
-api.rgb.onStatus((st) => { L.status = st; if (S.page === 'lights') renderPage(); });
+api.rgb.onStatus((st) => { L.status = st; if (S.page === 'lights' && !L.applying) renderPage(); });
+// Kayıtlı taslak görünümü geri yükle
+api.ui.get().then((ui) => { if (ui?.lightsDraft) L.draft = { ...L.draft, ...ui.lightsDraft }; }).catch(() => {});

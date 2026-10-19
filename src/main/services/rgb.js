@@ -1,76 +1,118 @@
-// RGB aydınlatma: OpenRGB SDK sunucusu üzerinden anakart, RAM, ekran kartı, klavye, fare, kasa fanı vb.
-// OpenRGB 1 sunucu olarak (port 6742) arka planda çalışır; efektleri Orbit hesaplayıp LED'lere gönderir.
+// RGB aydınlatma motoru (OpenRGB SDK sunucusu, port 6742)
+//
+// Öncelik cihazın KENDİ donanım efektidir: akıcıdır, Orbit kapalıyken de çalışır ve
+// automaticSave/manualSave destekleyen cihazlarda kalıcıdır. Yazılım animasyonu yalnızca gerçek
+// "Direct" modu olan cihazlarda ve donanım karşılığı olmayan efektlerde (ya da Senkron modda)
+// kullanılır; düşük kare hızında ve yalnızca renk değiştiğinde gönderilir.
+// "Custom" modu her yazmada cihaz hafızasına kaydettiği için ASLA animasyonda kullanılmaz.
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { Client } = require('openrgb-sdk');
 const store = require('./store');
+const log = require('./log');
 
 const PORT = 6742;
-const FPS = 24;
+const PROTOCOL = 4; // openrgb-sdk 0.6 daha yeni protokol alanlarını çözemiyor
+const TICK = 1000 / 30;
 
 const TYPES = ['Anakart', 'RAM', 'Ekran Kartı', 'Soğutucu', 'LED Şerit', 'Klavye', 'Fare', 'Mousepad', 'Kulaklık', 'Kulaklık Standı',
   'Gamepad', 'Işık', 'Hoparlör', 'Sanal', 'Depolama', 'Kasa', 'Mikrofon', 'Aksesuar', 'Tuş Takımı', 'Laptop', 'Monitör'];
+const SLOW_BUS = new Set([0, 1, 2]); // SMBus/I2C cihazları: anakart, RAM, ekran kartı
 
 const EFFECTS = {
   static: 'Sabit',
   breathing: 'Nefes',
-  rainbow: 'Gökkuşağı dalgası',
+  pulse: 'Nabız',
   spectrum: 'Renk döngüsü',
-  wave: 'İki renk dalga',
-  pulse: 'Kalp atışı',
+  rainbow: 'Gökkuşağı dalgası',
+  wave: 'Renk dalgası',
   off: 'Kapalı',
 };
 
+// Efekt -> cihazlarda aranacak donanım modları (sırayla)
+const NATIVE = {
+  static: [/^static$/i],
+  off: [/^off$/i],
+  breathing: [/^breathing$/i, /breath/i, /^color pulse$/i, /pulse/i],
+  pulse: [/^color pulse$/i, /^double flash$/i, /^flashing$/i, /pulse/i, /breath/i],
+  spectrum: [/^spectrum cycle$/i, /^color cycle$/i, /^cycle$/i, /^rainbow$/i, /spectrum/i, /colormixing/i],
+  rainbow: [/^rainbow wave$/i, /^wave$/i, /rainbow wave/i, /vertical rainbow/i, /rainbow circle/i, /^color wheel$/i, /^rainbow$/i, /spectrum cycle/i, /color cycle/i, /^cycle$/i],
+  wave: [/^color wave$/i, /^color shift$/i, /^visor$/i, /wave/i, /breath/i],
+};
+const ANIMATED = new Set(['breathing', 'pulse', 'spectrum', 'rainbow', 'wave']);
+
 const PRESETS = [
-  { id: 'p_aurora', name: 'Aurora', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 4, brightness: 100 },
-  { id: 'p_sunset', name: 'Gün Batımı', effect: 'wave', colors: ['#ff7a18', '#ff2e63'], speed: 3, brightness: 100 },
-  { id: 'p_rainbow', name: 'Gökkuşağı', effect: 'rainbow', colors: ['#ff0000', '#0000ff'], speed: 5, brightness: 100 },
-  { id: 'p_ocean', name: 'Okyanus', effect: 'breathing', colors: ['#1e6bff', '#000000'], speed: 3, brightness: 100 },
-  { id: 'p_gaming', name: 'Oyun Modu', effect: 'pulse', colors: ['#ff1e3c', '#000000'], speed: 6, brightness: 100 },
-  { id: 'p_cyber', name: 'Cyberpunk', effect: 'wave', colors: ['#fcee0a', '#00f0ff'], speed: 5, brightness: 100 },
-  { id: 'p_focus', name: 'Odak (sıcak beyaz)', effect: 'static', colors: ['#ffb46b', '#000000'], speed: 1, brightness: 45 },
-  { id: 'p_white', name: 'Saf Beyaz', effect: 'static', colors: ['#ffffff', '#000000'], speed: 1, brightness: 100 },
+  { id: 'p_aurora', name: 'Aurora', effect: 'wave', colors: ['#00e5c0', '#7b2ff7'], speed: 3, brightness: 100 },
+  { id: 'p_rainbow', name: 'Gökkuşağı', effect: 'rainbow', colors: ['#ff0000', '#0000ff'], speed: 3, brightness: 100 },
   { id: 'p_spectrum', name: 'Renk Döngüsü', effect: 'spectrum', colors: ['#ff0000', '#000000'], speed: 3, brightness: 100 },
-  { id: 'p_off', name: 'Tümünü Kapat', effect: 'off', colors: ['#000000', '#000000'], speed: 1, brightness: 0 },
+  { id: 'p_sunset', name: 'Gün Batımı', effect: 'wave', colors: ['#ff7a18', '#ff2e63'], speed: 3, brightness: 100 },
+  { id: 'p_ocean', name: 'Okyanus Nefesi', effect: 'breathing', colors: ['#1e6bff', '#00c2ff'], speed: 3, brightness: 100 },
+  { id: 'p_purple', name: 'Mor Nefes', effect: 'breathing', colors: ['#9b5cff', '#ff4fd8'], speed: 3, brightness: 100 },
+  { id: 'p_gaming', name: 'Oyun Modu', effect: 'static', colors: ['#ff1e3c', '#000000'], speed: 3, brightness: 100 },
+  { id: 'p_cyber', name: 'Cyberpunk', effect: 'wave', colors: ['#fcee0a', '#00f0ff'], speed: 4, brightness: 100 },
+  { id: 'p_matrix', name: 'Matrix', effect: 'wave', colors: ['#00ff41', '#003b00'], speed: 3, brightness: 100 },
+  { id: 'p_ice', name: 'Buz Mavisi', effect: 'static', colors: ['#7fd4ff', '#000000'], speed: 3, brightness: 100 },
+  { id: 'p_focus', name: 'Odak (sıcak beyaz)', effect: 'static', colors: ['#ffb46b', '#000000'], speed: 3, brightness: 50 },
+  { id: 'p_white', name: 'Saf Beyaz', effect: 'static', colors: ['#ffffff', '#000000'], speed: 3, brightness: 100 },
+  { id: 'p_off', name: 'Tümünü Kapat', effect: 'off', colors: ['#000000', '#000000'], speed: 3, brightness: 0 },
 ];
 
 const hexToRgb = (hex) => {
   const n = parseInt(String(hex || '#000000').replace('#', '').padEnd(6, '0').slice(0, 6), 16);
   return { red: (n >> 16) & 255, green: (n >> 8) & 255, blue: n & 255 };
 };
+const BLACK = { red: 0, green: 0, blue: 0 };
 const scale = (c, f) => ({ red: Math.round(c.red * f), green: Math.round(c.green * f), blue: Math.round(c.blue * f) });
 const mix = (a, b, t) => ({ red: Math.round(a.red + (b.red - a.red) * t), green: Math.round(a.green + (b.green - a.green) * t), blue: Math.round(a.blue + (b.blue - a.blue) * t) });
+const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function hsv(h) {
   const f = (n) => { const k = (n + h / 60) % 6; return Math.round(255 * (1 - Math.max(0, Math.min(k, 4 - k, 1)))); };
   return { red: f(5), green: f(3), blue: f(1) };
+}
+// Algısal parlaklık: lineer kaydırıcıyı gözün algıladığı ölçeğe çevir
+const gamma = (b) => Math.pow(clamp(b, 0, 1), 1.8);
+
+function normalize(p) {
+  return {
+    id: p.id, name: p.name,
+    effect: EFFECTS[p.effect] ? p.effect : 'static',
+    colors: [p.colors?.[0] || '#ffffff', p.colors?.[1] || p.colors?.[0] || '#000000'],
+    speed: clamp(+p.speed || 3, 1, 10),
+    brightness: clamp(p.brightness ?? 100, 0, 100),
+  };
 }
 
 class RGB extends EventEmitter {
   constructor() {
     super();
     this.client = null;
+    this.raw = new Map();     // deviceId -> SDK Device
     this.devices = [];
-    this.assign = new Map(); // deviceId -> { effect, colors, speed, brightness } | { native: modeName }
+    this.applied = new Map(); // deviceId -> { method, mode, effect }
+    this.soft = new Map();    // deviceId -> yazılım animasyon durumu
     this.timer = null;
     this.t0 = Date.now();
-    this.proc = null;
+    this.connecting = null;
+    this.reconnectTimer = null;
   }
 
   findExe() {
     const roots = [
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'OpenRGB'),
       path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages'),
       path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WinGet', 'Packages'),
-      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'OpenRGB'),
     ];
     const walk = (dir, depth) => {
       if (depth < 0 || !fs.existsSync(dir)) return null;
-      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+      for (const e of entries) {
         const p = path.join(dir, e.name);
         if (e.isFile() && e.name.toLowerCase() === 'openrgb.exe') return p;
-        if (e.isDirectory() && (depth < 3 || /openrgb/i.test(e.name))) {
-          if (dir.endsWith('Packages') && !/openrgb/i.test(e.name)) continue;
+        if (e.isDirectory() && !(dir.endsWith('Packages') && !/openrgb/i.test(e.name))) {
           const r = walk(p, depth - 1);
           if (r) return r;
         }
@@ -82,134 +124,272 @@ class RGB extends EventEmitter {
   }
 
   async tryConnect() {
-    // openrgb-sdk 0.6 yeni protokol alanlarını çözemiyor; OpenRGB 1.x ile uyumlu sürüme sabitle
-    const c = new Client('Orbit', PORT, '127.0.0.1', { forceProtocolVersion: +(process.env.ORBIT_RGB_PROTO || 4) });
+    const c = new Client('Orbit', PORT, '127.0.0.1', { forceProtocolVersion: PROTOCOL });
     await c.connect(1500);
-    c.on('disconnect', () => { this.client = null; this.stopLoop(); this.emit('status'); });
+    c.on('disconnect', () => {
+      if (this.client !== c) return;
+      log.warn('OpenRGB bağlantısı koptu');
+      this.client = null;
+      this.stopLoop();
+      this.emit('status');
+      this.scheduleReconnect();
+    });
     return c;
   }
 
-  /** OpenRGB sunucusuna bağlanır; çalışmıyorsa arka planda başlatır. */
-  async connect() {
-    if (this.client) return this.status();
-    try {
-      this.client = await this.tryConnect();
-    } catch {
-      const exe = this.findExe();
-      if (!exe) return { installed: false, connected: false };
-      this.proc = spawn(exe, ['--server', '--server-port', String(PORT), '--startminimized'], { cwd: path.dirname(exe), detached: true, stdio: 'ignore', windowsHide: true });
-      this.proc.unref();
-      for (let i = 0; i < 30 && !this.client; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        try { this.client = await this.tryConnect(); } catch {}
-      }
-      if (!this.client) throw new Error('OpenRGB başlatıldı ama bağlanılamadı. OpenRGB > SDK Server sekmesinden sunucuyu başlatın.');
-    }
-    await this.refresh();
-    return this.status();
+  scheduleReconnect() {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(async () => {
+      try { await this.connect(); await this.restore(); } catch { this.scheduleReconnect(); }
+    }, 5000);
   }
+
+  /** OpenRGB sunucusuna bağlanır; çalışmıyorsa arka planda başlatır. */
+  connect() {
+    if (this.client) return Promise.resolve(this.status());
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      try {
+        this.client = await this.tryConnect();
+      } catch {
+        const exe = this.findExe();
+        if (!exe) return { ...this.status(), installed: false };
+        log.info('OpenRGB sunucusu başlatılıyor: ' + exe);
+        const proc = spawn(exe, ['--server', '--server-port', String(PORT), '--startminimized'], { cwd: path.dirname(exe), detached: true, stdio: 'ignore', windowsHide: true });
+        proc.unref();
+        for (let i = 0; i < 40 && !this.client; i++) {
+          await new Promise((r) => setTimeout(r, 750));
+          try { this.client = await this.tryConnect(); } catch {}
+        }
+        if (!this.client) throw new Error('OpenRGB başlatıldı ama bağlanılamadı. OpenRGB penceresinde "SDK Server" sekmesinden sunucuyu başlatın.');
+      }
+      await this.refresh();
+      log.info(`OpenRGB bağlı, ${this.devices.length} cihaz`);
+      this.emit('status');
+      return this.status();
+    })().finally(() => { this.connecting = null; });
+    return this.connecting;
+  }
+
+  key(d) { return `${d.name}|${d.location || d.serial || ''}`; }
 
   async refresh() {
     if (!this.client) return [];
     const list = await this.client.getAllControllerData();
+    this.raw = new Map(list.map((d) => [d.deviceId, d]));
     this.devices = list.map((d) => ({
       id: d.deviceId,
+      key: this.key(d),
       name: d.name,
       vendor: d.vendor || '',
       type: TYPES[d.type] || 'Cihaz',
       typeId: d.type,
       leds: d.colors.length,
-      zones: d.zones.map((z) => z.name),
       modes: d.modes.map((m) => m.name),
       activeMode: d.modes[d.activeMode]?.name,
-      hasDirect: d.modes.some((m) => /direct|custom/i.test(m.name)),
+      hasDirect: d.modes.some((m) => /^direct$/i.test(m.name)),
+      saves: d.modes.some((m) => m.flagList.includes('automaticSave') || m.flagList.includes('manualSave')),
     }));
     return this.devices;
   }
 
   status() {
+    const st = store.get('rgbState') || { global: null, devices: {} };
     return {
       installed: !!this.client || !!this.findExe(),
       connected: !!this.client,
-      devices: this.devices,
+      devices: this.devices.map((d) => ({ ...d, applied: this.applied.get(d.id) || null })),
       effects: EFFECTS,
       presets: PRESETS,
       profiles: store.get('rgbProfiles') || [],
-      active: store.get('rgbActive') || null,
+      active: st.global,
+      engine: store.get('settings').rgbEngine,
     };
   }
 
-  /** Bir profili (efekt) tüm cihazlara ya da tek cihaza uygular. */
-  async apply(profile, deviceId = null) {
+  // ---------- Uygulama ----------
+
+  /** Profili tüm cihazlara (deviceId null) ya da tek cihaza uygular ve hatırlar. */
+  async apply(profile, deviceId = null, { remember = true } = {}) {
     if (!this.client) await this.connect();
     if (!this.client) throw new Error('OpenRGB bağlı değil');
-    const targets = deviceId == null ? this.devices : this.devices.filter((d) => d.id === deviceId);
+    const p = normalize(profile);
+    const targets = deviceId == null ? [...this.raw.values()] : [this.raw.get(deviceId)].filter(Boolean);
+    const errors = [];
     for (const d of targets) {
-      if (profile.native) {
-        await this.client.updateMode(d.id, profile.native);
-        this.assign.delete(d.id);
-        continue;
-      }
-      if (d.hasDirect) await this.client.updateMode(d.id, d.modes.find((m) => /direct/i.test(m)) || d.modes.find((m) => /custom/i.test(m)));
-      else this.client.setCustomMode(d.id);
-      this.assign.set(d.id, { effect: profile.effect, colors: profile.colors.map(hexToRgb), speed: profile.speed || 3, brightness: (profile.brightness ?? 100) / 100 });
+      try { await this.applyToDevice(d, p); } catch (e) { errors.push(`${d.name}: ${e.message}`); log.error(`RGB uygulanamadı (${d.name})`, e); }
     }
-    if (deviceId == null) store.set('rgbActive', { ...profile, deviceId: null });
-    this.frame(true);
+    if (remember) {
+      const st = store.get('rgbState') || { global: null, devices: {} };
+      if (deviceId == null) store.set('rgbState', { global: p, devices: {} });
+      else store.set('rgbState', { ...st, devices: { ...st.devices, [this.key(targets[0])]: { profile: p } } });
+    }
     this.startLoop();
-    return true;
+    this.emit('status');
+    if (errors.length === targets.length && targets.length) throw new Error(errors[0]);
+    return this.status();
   }
 
-  frame(force = false) {
+  /** Cihazın belirli bir donanım modunu seçer (cihaz kartındaki "Mod" listesi). */
+  async applyNative(deviceId, modeName, opts = {}, { remember = true } = {}) {
+    if (!this.client) await this.connect();
+    const d = this.raw.get(deviceId);
+    if (!d) throw new Error('Cihaz bulunamadı');
+    const mode = d.modes.find((m) => m.name === modeName);
+    if (!mode) throw new Error('Mod bulunamadı');
+    this.soft.delete(d.deviceId);
+    const p = normalize({ effect: 'static', colors: opts.colors || ['#ffffff'], speed: opts.speed, brightness: opts.brightness });
+    await this.setMode(d, mode, p);
+    this.applied.set(d.deviceId, { method: 'Donanım', mode: mode.name });
+    if (remember) {
+      const st = store.get('rgbState') || { global: null, devices: {} };
+      store.set('rgbState', { ...st, devices: { ...st.devices, [this.key(d)]: { native: { mode: modeName, ...p } } } });
+    }
+    this.startLoop();
+    this.emit('status');
+    return this.status();
+  }
+
+  findMode(d, effect) {
+    for (const re of NATIVE[effect] || []) {
+      const m = d.modes.find((x) => re.test(x.name));
+      if (m) return m;
+    }
+    return null;
+  }
+
+  directMode(d) { return d.modes.find((m) => /^direct$/i.test(m.name)) || null; }
+
+  async applyToDevice(d, p) {
+    this.soft.delete(d.deviceId);
+    const sync = store.get('settings').rgbEngine === 'sync';
+    const direct = this.directMode(d);
+    const animated = ANIMATED.has(p.effect);
+
+    // Senkron mod: Direct destekleyen cihazlarda tüm animasyonlar aynı saatle yazılımdan
+    if (sync && animated && direct) return this.startSoft(d, direct, p);
+
+    let mode = this.findMode(d, p.effect);
+    if (mode) {
+      await this.setMode(d, mode, p);
+      this.applied.set(d.deviceId, { method: 'Donanım', mode: mode.name, effect: p.effect });
+      return;
+    }
+    if (animated && direct) return this.startSoft(d, direct, p);
+
+    // Sabit renk / kapalı ya da donanım karşılığı olmayan efekt:
+    // Static > cihaz hafızasına kaydeden per-LED mod (ör. RAM "Custom", tek seferlik yazma) > Direct
+    const persistent = d.modes.find((m) => m.colorMode === 1 && (m.flagList.includes('automaticSave') || m.flagList.includes('manualSave')));
+    mode = this.findMode(d, 'static') || persistent || direct || d.modes.find((m) => m.colorMode === 1);
+    if (!mode) throw new Error('Desteklenen mod yok');
+    const color = p.effect === 'off' ? { ...p, colors: ['#000000', '#000000'] } : p;
+    await this.setMode(d, mode, color);
+    const exact = ['static', 'off'].includes(p.effect);
+    this.applied.set(d.deviceId, { method: 'Donanım', mode: mode.name, effect: exact ? p.effect : 'static', note: exact ? '' : 'Bu cihazda bu efekt yok, sabit renk verildi' });
+  }
+
+  /** Donanım modunu hız/parlaklık/renk ile ayarlar; manualSave destekliyorsa cihaza kaydeder. */
+  async setMode(d, mode, p) {
+    const flags = mode.flagList || [];
+    const m = { id: mode.id };
+    const t = (p.speed - 1) / 9;
+    if (flags.includes('speed')) m.speed = lerp(mode.speedMin, mode.speedMax, t);
+    const hasBri = flags.includes('brightness') && mode.brightnessMax !== mode.brightnessMin && mode.brightnessMax != null;
+    if (hasBri) m.brightness = lerp(mode.brightnessMin, mode.brightnessMax, p.effect === 'off' ? 0 : p.brightness / 100);
+    const c1 = hexToRgb(p.colors[0]);
+    const c2 = hexToRgb(p.colors[1]);
+    // Donanım parlaklığı yoksa rengi koyulaştırarak uygula
+    const tint = (c) => (hasBri ? c : scale(c, gamma(p.brightness / 100)));
+    if (mode.colorMode === 2 && mode.colorMax > 0) {
+      const n = clamp(2, Math.max(1, mode.colorMin), mode.colorMax);
+      m.colors = [tint(c1), tint(c2)].slice(0, n);
+      while (m.colors.length < n) m.colors.push(tint(c1));
+    }
+    await this.client.updateMode(d.deviceId, m);
+    // Per-LED modlar (Direct/Custom/Static-colorMax=0) renkleri LED'lerden okur: tek seferlik yaz
+    if (mode.colorMode === 1 || (mode.colorMode === 2 && !mode.colorMax)) {
+      const c = p.effect === 'off' ? BLACK : tint(c1);
+      this.client.updateLeds(d.deviceId, new Array(d.colors.length).fill(c));
+    }
+    if (flags.includes('manualSave')) await this.client.saveMode(d.deviceId, m);
+  }
+
+  // ---------- Yazılım animasyonu (yalnızca Direct) ----------
+
+  async startSoft(d, direct, p) {
+    await this.client.updateMode(d.deviceId, { id: direct.id });
+    this.soft.set(d.deviceId, {
+      p, n: d.colors.length, every: SLOW_BUS.has(d.type) ? 3 : 1, // SMBus: 10 fps, USB: 30 fps
+      c1: hexToRgb(p.colors[0]), c2: hexToRgb(p.colors[1]), last: '', tick: 0,
+      // hız 1 → 16 sn'lik döngü, 10 → 2 sn
+      period: 16 - ((p.speed - 1) / 9) * 14,
+      bri: gamma(p.brightness / 100),
+    });
+    this.applied.set(d.deviceId, { method: 'Yazılım', mode: 'Direct', effect: p.effect });
+  }
+
+  frame() {
     if (!this.client) return;
     const t = (Date.now() - this.t0) / 1000;
-    for (const d of this.devices) {
-      const a = this.assign.get(d.id);
-      if (!a || !d.leds) continue;
-      const animated = !['static', 'off'].includes(a.effect);
-      if (!animated && !force) continue;
-      const [c1, c2] = a.colors;
-      const sp = a.speed;
-      const out = new Array(d.leds);
-      for (let i = 0; i < d.leds; i++) {
+    for (const [id, s] of this.soft) {
+      if (s.tick++ % s.every) continue;
+      const phase = (t / s.period) % 1;
+      const out = new Array(s.n);
+      for (let i = 0; i < s.n; i++) {
+        const pos = s.n > 1 ? i / s.n : 0;
         let c;
-        switch (a.effect) {
-          case 'static': c = c1; break;
-          case 'off': c = { red: 0, green: 0, blue: 0 }; break;
-          case 'breathing': c = scale(c1, 0.08 + 0.92 * (Math.sin(t * sp * 0.6) + 1) / 2); break;
-          case 'pulse': { const p = (t * sp * 0.35) % 1; c = scale(c1, Math.max(Math.exp(-p * 18), 0.7 * Math.exp(-Math.abs(p - 0.22) * 22), 0.05)); break; }
-          case 'spectrum': c = hsv((t * sp * 20) % 360); break;
-          case 'rainbow': c = hsv((t * sp * 40 + (i * 360) / Math.max(d.leds, 8)) % 360); break;
-          case 'wave': c = mix(c1, c2, (Math.sin(t * sp * 0.8 - (i / Math.max(d.leds, 6)) * Math.PI * 2) + 1) / 2); break;
-          default: c = c1;
+        switch (s.p.effect) {
+          case 'breathing': c = mix(scale(s.c1, 0.04), s.c1, 0.5 - 0.5 * Math.cos(phase * 2 * Math.PI)); break;
+          case 'pulse': { const b = Math.max(Math.exp(-phase * 14), 0.75 * Math.exp(-Math.abs(phase - 0.2) * 18)); c = scale(s.c1, 0.04 + 0.96 * b); break; }
+          case 'spectrum': c = hsv(phase * 360); break;
+          case 'rainbow': c = hsv(((phase + pos) % 1) * 360); break;
+          case 'wave': c = mix(s.c1, s.c2, 0.5 + 0.5 * Math.sin((phase - pos) * 2 * Math.PI)); break;
+          default: c = s.c1;
         }
-        out[i] = scale(c, a.brightness);
+        out[i] = scale(c, s.bri);
       }
-      try { this.client.updateLeds(d.id, out); } catch {}
+      const sig = out.map((c) => (c.red >> 2) * 4096 + (c.green >> 2) * 64 + (c.blue >> 2)).join(',');
+      if (sig === s.last) continue; // değişmeyen kareyi gönderme
+      s.last = sig;
+      try { this.client.updateLeds(id, out); } catch (e) { log.warn('LED güncellenemedi', e); }
     }
   }
 
   startLoop() {
-    const animated = [...this.assign.values()].some((a) => !['static', 'off'].includes(a.effect));
-    if (animated && !this.timer) this.timer = setInterval(() => this.frame(), 1000 / FPS);
-    if (!animated) this.stopLoop();
+    if (this.soft.size && !this.timer) this.timer = setInterval(() => this.frame(), TICK);
+    if (!this.soft.size) this.stopLoop();
   }
   stopLoop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
 
+  // ---------- Profiller / kalıcılık ----------
+
   saveProfile(p) {
     const list = (store.get('rgbProfiles') || []).filter((x) => x.id !== p.id);
-    const item = { id: p.id || 'u_' + Date.now().toString(36), name: String(p.name || 'Profilim').slice(0, 40), effect: p.effect, colors: p.colors, speed: +p.speed || 3, brightness: +p.brightness || 100 };
+    const item = { ...normalize(p), id: p.id && String(p.id).startsWith('u_') ? p.id : 'u_' + Date.now().toString(36), name: String(p.name || 'Profilim').slice(0, 40) };
     store.set('rgbProfiles', [...list, item]);
     return item;
   }
   deleteProfile(id) { store.set('rgbProfiles', (store.get('rgbProfiles') || []).filter((x) => x.id !== id)); }
 
-  /** Açılışta son kullanılan görünümü geri yükler. */
+  /** Açılışta (ve bağlantı yeniden kurulunca) son görünümü geri yükler. */
   async restore() {
-    const a = store.get('rgbActive');
-    if (!a) return;
-    try { await this.connect(); if (this.client) await this.apply(a); } catch {}
+    const st = store.get('rgbState');
+    if (!st || (!st.global && !Object.keys(st.devices || {}).length)) return;
+    try {
+      await this.connect();
+      if (!this.client) return;
+      if (st.global) await this.apply(st.global, null, { remember: false });
+      for (const [key, v] of Object.entries(st.devices || {})) {
+        const d = [...this.raw.values()].find((x) => this.key(x) === key);
+        if (!d) continue;
+        if (v.native) await this.applyNative(d.deviceId, v.native.mode, v.native, { remember: false });
+        else if (v.profile) await this.apply(v.profile, d.deviceId, { remember: false });
+      }
+      log.info('RGB görünümü geri yüklendi');
+    } catch (e) { log.warn('RGB geri yüklenemedi', e); }
   }
+
+  shutdown() { this.stopLoop(); clearTimeout(this.reconnectTimer); }
 }
 
 module.exports = new RGB();

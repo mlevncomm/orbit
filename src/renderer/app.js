@@ -64,6 +64,20 @@ const boardName = (sys) => `${sys.board.vendor.replace(/\s*(Technology Co\., Ltd
 const isInstalled =(a) => a.wingetId && S.installed.has(a.wingetId.toLowerCase());
 const selectedApps = () => S.catalog.apps.filter((a) => S.selection.has(a.key));
 const persistSelection = () => api.selection.set([...S.selection]);
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+/** Arayüz durumunu (sayfa, filtre, Panel seçenekleri…) kalıcı kaydeder */
+const saveUi = debounce((patch) => api.ui.set(patch).catch(() => {}), 250);
+const persistChat = debounce(() => api.chat.set(S.chat.filter((m) => m.role !== 'tool').slice(-200)).catch(() => {}), 400);
+/** Ayarı anında kaydeder ve "Kaydedildi" göstergesini yakar */
+async function saveSetting(patch) {
+  const next = await safe(() => api.settings.set(patch), 'Kaydedilemedi');
+  if (!next) return null;
+  S.settings = next;
+  renderChrome();
+  const chip = $('#savedChip');
+  if (chip) { chip.hidden = false; clearTimeout(saveSetting.t); saveSetting.t = setTimeout(() => (chip.hidden = true), 1600); }
+  return next;
+}
 
 function pushFeed(entry) {
   S.feed.push({ id: Math.random().toString(36).slice(2), time: time(), ...entry });
@@ -86,7 +100,9 @@ function renderChrome() {
 }
 
 function navigate(page) {
+  if (!PAGES[page]) page = 'dashboard';
   S.page = page;
+  saveUi({ page });
   document.getElementById('app').classList.remove('feed-open');
   $('#scrim').classList.remove('show');
   renderChrome();
@@ -313,51 +329,73 @@ PAGES.assistantAfter = () => {
 
 PAGES.settings = () => {
   const s = S.settings;
+  const sw = (key, label, hint) => `<label class="switch"><input type="checkbox" data-setting="${key}" ${s[key] ? 'checked' : ''}><span>${label}${hint ? `<small>${hint}</small>` : ''}</span></label>`;
+  const hist = (S.historyCache || []).slice(0, 40);
   return `
-    <div class="page-head"><div><h1>Ayarlar</h1><p>Profil, görünüm ve yapay zeka</p></div></div>
+    <div class="page-head"><div><h1>Ayarlar</h1><p>Her değişiklik anında kaydedilir</p></div>
+      <span class="chip saved" id="savedChip" hidden>${I('check', 14)}Kaydedildi</span></div>
     <div class="two" style="margin-top:0">
       <div class="card form">
         <h3>Profil</h3>
-        <div class="field"><label>Adın</label><input class="input" id="setName" value="${h(s.userName)}" placeholder="Asistan sana böyle hitap eder"></div>
-        <div class="field"><label>Kurulum profili</label><small>Seçtiğin programlar ve eklediğin özel programlar. Format öncesi dışa aktarıp USB'de sakla; format sonrası içe aktar ve "Hepsini Kur".</small>
-          <div class="row"><button class="btn" data-action="export">${I('upload')}Dışa aktar</button><button class="btn" data-action="import">${I('download')}İçe aktar</button></div></div>
+        <div class="field"><label>Adın</label><input class="input" data-auto="userName" value="${h(s.userName)}" placeholder="Asistan sana böyle hitap eder"></div>
         <div class="field"><label>Tema</label><div class="seg"><button class="${s.theme !== 'dark' ? 'active' : ''}" data-theme-set="light">Açık</button><button class="${s.theme === 'dark' ? 'active' : ''}" data-theme-set="dark">Koyu</button></div></div>
-        <div class="row"><button class="btn primary" data-action="save-profile">Kaydet</button></div>
+        <div class="field"><label>Kurulum profili</label><small>Seçtiğin programlar, özel programların ve RGB profillerin tek dosyada. Format öncesi dışa aktarıp USB'de sakla; format sonrası içe aktar ve "Hepsini Kur".</small>
+          <div class="row"><button class="btn" data-action="export">${I('upload')}Dışa aktar</button><button class="btn" data-action="import">${I('download')}İçe aktar</button></div></div>
       </div>
       <div class="card form">
         <h3>Yapay Zeka</h3>
         <div class="field"><label>Sağlayıcı</label>
-          <select class="input" id="setProvider"><option value="anthropic" ${s.aiProvider === 'anthropic' ? 'selected' : ''}>Claude (Anthropic API)</option><option value="ollama" ${s.aiProvider === 'ollama' ? 'selected' : ''}>Ollama (yerel, internetsiz)</option></select></div>
+          <select class="input" data-auto="aiProvider"><option value="anthropic" ${s.aiProvider === 'anthropic' ? 'selected' : ''}>Claude (Anthropic API)</option><option value="ollama" ${s.aiProvider === 'ollama' ? 'selected' : ''}>Ollama (yerel, internetsiz)</option></select></div>
         <div class="field"><label>Claude modeli</label>
-          <select class="input" id="setModel">${['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((m) => `<option ${s.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
-        <div class="field"><label>Claude API anahtarı</label><input class="input" id="setKey" type="password" placeholder="${s.hasApiKey ? '•••••••• kayıtlı (değiştirmek için yazın)' : 'sk-ant-…'}"><small>Windows hesabınla şifrelenerek bu bilgisayarda saklanır. console.anthropic.com adresinden alabilirsin.</small></div>
-        <div class="field"><label>Ollama modeli / adresi</label><div class="row"><input class="input" id="setOllama" value="${h(s.ollamaModel)}" style="flex:1"><input class="input" id="setOllamaUrl" value="${h(s.ollamaUrl)}" style="flex:1.4"></div></div>
-        <div class="row"><button class="btn primary" data-action="save-ai">Kaydet</button>${s.hasApiKey ? '<button class="btn" data-action="clear-key">Anahtarı sil</button>' : ''}</div>
+          <select class="input" data-auto="model">${['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((m) => `<option ${s.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
+        <div class="field"><label>Claude API anahtarı</label>
+          <div class="row"><input class="input" id="setKey" type="password" autocomplete="off" placeholder="${s.hasApiKey ? '•••••••••••• kayıtlı' : 'sk-ant-…  (yapıştırınca otomatik kaydedilir)'}" style="flex:1">
+          ${s.hasApiKey ? `<button class="btn" data-action="clear-key">${I('trash')}Sil</button>` : ''}</div>
+          <small>${s.hasApiKey ? '✓ Anahtar kayıtlı. ' : ''}Windows hesabınla şifrelenerek yalnızca bu bilgisayarda saklanır.</small></div>
+        <div class="field"><label>Ollama modeli / adresi</label><div class="row"><input class="input" data-auto="ollamaModel" value="${h(s.ollamaModel)}" style="flex:1"><input class="input" data-auto="ollamaUrl" value="${h(s.ollamaUrl)}" style="flex:1.4"></div></div>
       </div>
     </div>
     <div class="two">
       <div class="card form">
-        <h3>Güncellemeler</h3>
-        <p class="sub">Sürüm <b>v${h(S.version)}</b> · ${h(updateText())}</p>
+        <h3>Başlangıç ve arka plan</h3>
+        ${sw('startWithWindows', 'Windows açılınca arka planda başlat', 'Son RGB görünümün her açılışta otomatik geri gelir.')}
+        ${sw('minimizeToTray', 'Kapatınca sistem tepsisine küçült', 'Işık efektleri ve güncelleme denetimi çalışmaya devam eder.')}
+        <div class="field"><label>RGB motoru</label>
+          <div class="seg"><button class="${s.rgbEngine !== 'sync' ? 'active' : ''}" data-engine="hardware">Donanım (önerilen)</button><button class="${s.rgbEngine === 'sync' ? 'active' : ''}" data-engine="sync">Senkron</button></div>
+          <small>Donanım: her cihaz efekti kendi çipinde çalıştırır; akıcıdır ve Orbit kapalıyken de sürer. Senkron: Direct destekleyen cihazlar tek saatle aynı anda yanar.</small></div>
+      </div>
+      <div class="card form">
+        <h3>Güncellemeler ve hakkında</h3>
+        <p class="sub">Orbit <b>v${h(S.version)}</b> · ${h(updateText())}</p>
         <div class="row"><button class="btn" data-action="update-check">${I('refresh')}Güncellemeleri denetle</button>
           ${S.update.state === 'available' ? `<button class="btn primary" data-action="update-download">v${h(S.update.version)} indir</button>` : ''}
           ${S.update.state === 'ready' ? `<button class="btn primary" data-action="update-install">Yeniden başlat ve güncelle</button>` : ''}</div>
-      </div>
-      <div class="card form">
-        <h3>Başlangıç</h3>
-        <label class="switch"><input type="checkbox" data-setting="startWithWindows" ${s.startWithWindows ? 'checked' : ''}><span>Windows açılınca arka planda başlat (RGB görünümün otomatik gelsin)</span></label>
-        <label class="switch"><input type="checkbox" data-setting="minimizeToTray" ${s.minimizeToTray ? 'checked' : ''}><span>Kapatınca sistem tepsisine küçült (efektler çalışmaya devam eder)</span></label>
+        <div class="row"><button class="btn" data-action="open-logs">${I('terminal')}Günlük klasörü</button><button class="btn" data-open="https://github.com/mlevncomm/orbit/releases">${I('external')}Sürüm notları</button></div>
       </div>
     </div>
-    <div class="card" style="margin-top:12px"><h3>Kurulum geçmişi</h3><div id="historyBox" class="sub" style="margin-top:8px"><span class="spinner"></span></div></div>`;
+    <div class="card" style="margin-top:12px"><h3>Kurulum geçmişi</h3><div class="sub" style="margin-top:8px">
+      ${hist.length ? `<table class="table"><tbody>${hist.map((x) => `<tr><td>${h(x.name)}</td><td><span class="status-dot ${x.status}" style="display:inline-block"></span> ${h(statusLabel(x))}</td><td>${new Date(x.at).toLocaleString('tr-TR')}</td></tr>`).join('')}</tbody></table>` : 'Henüz kurulum yapılmadı.'}
+    </div></div>`;
 };
-PAGES.settingsAfter = async () => {
-  const hist = await safe(() => api.history.get());
-  const box = $('#historyBox');
-  if (!box) return;
-  box.innerHTML = hist?.length
-    ? `<table class="table"><tbody>${hist.slice(0, 30).map((x) => `<tr><td>${h(x.name)}</td><td><span class="status-dot ${x.status}" style="display:inline-block"></span> ${h(x.status)}</td><td>${new Date(x.at).toLocaleString('tr-TR')}</td></tr>`).join('')}</tbody></table>`
-    : 'Henüz kurulum yapılmadı.';
+PAGES.settingsAfter = () => {
+  // Metin alanları yazmayı bırakınca, seçimler anında kaydedilir
+  document.querySelectorAll('[data-auto]').forEach((el) => {
+    const commit = () => saveSetting({ [el.dataset.auto]: el.value.trim() });
+    if (el.tagName === 'SELECT') el.addEventListener('change', commit);
+    else { el.addEventListener('input', debounce(commit, 500)); el.addEventListener('blur', commit); }
+  });
+  const key = $('#setKey');
+  const saveKey = async () => {
+    const v = key.value.trim();
+    if (!v) return;
+    if (!/^sk-ant-/.test(v)) return toast('Anahtar "sk-ant-" ile başlamalı', true);
+    await saveSetting({ apiKey: v });
+    toast('API anahtarı kaydedildi');
+    renderPage();
+  };
+  key.addEventListener('change', saveKey);
+  key.addEventListener('paste', () => setTimeout(saveKey, 50));
+  if (!S.historyCache) safe(() => api.history.get()).then((hst) => { S.historyCache = hst || []; if (S.page === 'settings') renderPage(); });
 };
 
 function updateText() {
@@ -467,6 +505,7 @@ async function sendChat(text) {
   try {
     const r = await api.ai.chat(history);
     S.chat.push({ role: 'assistant', content: r.text || '…', time: time() });
+    persistChat();
   } catch (e) {
     S.chat.push({ role: 'assistant', content: '⚠ ' + e.message, time: time() });
   }
@@ -480,6 +519,7 @@ api.ai.onTool((t) => {
 });
 api.ai.onProposal((p) => {
   S.chat.push({ role: 'proposal', id: 'p' + Date.now(), ...p });
+  persistChat();
   if (S.page === 'assistant') renderPage();
 });
 
@@ -549,7 +589,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab]');
+  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine]');
   if (!t) return;
   const d = t.dataset;
 
@@ -562,9 +602,10 @@ document.addEventListener('click', async (e) => {
   }
   if (d.nav) { navigate(d.nav); if ('focusSearch' in d) $('#appSearch')?.focus(); return; }
   if (d.toggle) { S.selection.has(d.toggle) ? S.selection.delete(d.toggle) : S.selection.add(d.toggle); persistSelection(); return renderPage(); }
-  if (d.cat) { S.cat = d.cat; return renderPage(); }
-  if (d.dashTab) { S.dashTab = d.dashTab; return renderPage(); }
-  if (d.opt) { S.opts[d.opt] = !S.opts[d.opt]; return renderPage(); }
+  if (d.cat) { S.cat = d.cat; saveUi({ cat: d.cat }); return renderPage(); }
+  if (d.dashTab) { S.dashTab = d.dashTab; saveUi({ dashTab: d.dashTab }); return renderPage(); }
+  if (d.opt) { S.opts[d.opt] = !S.opts[d.opt]; saveUi({ opts: { ...S.opts } }); return renderPage(); }
+  if (d.engine) { await saveSetting({ rgbEngine: d.engine }); return renderPage(); }
   if (d.themeSet) return setTheme(d.themeSet);
   if (d.open) return safe(() => api.system.open(d.open));
   if (d.installRec) { const r = S.recs.find((x) => x.key === d.installRec); return startInstall([r], `${r.name} kur`); }
@@ -574,6 +615,7 @@ document.addEventListener('click', async (e) => {
   if (d.proposal) {
     const p = S.chat.find((m) => m.id === d.proposal);
     p.used = true;
+    persistChat();
     const keys = new Set(p.apps.map((a) => a.key));
     keys.forEach((k) => S.selection.add(k)); persistSelection();
     await startInstall(S.catalog.apps.filter((a) => keys.has(a.key)), 'Asistanın önerisini kur');
@@ -595,32 +637,25 @@ document.addEventListener('click', async (e) => {
     case 'refresh-sys': S.sys = null; renderPage(); return loadSystem(true);
     case 'relaunch-admin': return safe(() => api.system.relaunchAdmin());
     case 'restart': return safe(() => api.system.restart()).then(() => toast('Bilgisayar 15 saniye içinde yeniden başlatılacak'));
-    case 'clear-chat': S.chat = []; return renderPage();
+    case 'clear-chat': S.chat = []; persistChat(); return renderPage();
     case 'export': { const p = await safe(() => api.profile.export()); if (p) toast('Profil kaydedildi'); return; }
     case 'import': {
       const ok = await safe(() => api.profile.import());
       if (ok) { S.catalog = await api.catalog.get(); S.selection = new Set(await api.selection.get()); toast('Profil içe aktarıldı'); renderPage(); }
       return;
     }
-    case 'save-profile': S.settings = await api.settings.set({ userName: $('#setName').value.trim() }); renderChrome(); return toast('Kaydedildi');
-    case 'save-ai': {
-      const patch = { aiProvider: $('#setProvider').value, model: $('#setModel').value, ollamaModel: $('#setOllama').value.trim(), ollamaUrl: $('#setOllamaUrl').value.trim() };
-      const key = $('#setKey').value.trim();
-      if (key) patch.apiKey = key;
-      S.settings = await safe(() => api.settings.set(patch)) || S.settings;
-      renderPage(); return toast('Yapay zeka ayarları kaydedildi');
-    }
+    case 'open-logs': return safe(() => api.app.openLogs());
     case 'update-check': S.update = await safe(() => api.update.check()) || S.update; return renderPage();
     case 'update-download': return safe(() => api.update.download());
     case 'update-install': return safe(() => api.update.install());
-    case 'clear-key':S.settings = await api.settings.set({ apiKey: '' }); renderPage(); return toast('Anahtar silindi');
+    case 'clear-key': await saveSetting({ apiKey: '' }); renderPage(); return toast('Anahtar silindi');
   }
 });
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlays(); });
 document.addEventListener('change', async (e) => {
   const k = e.target.dataset?.setting;
-  if (k) { S.settings = await api.settings.set({ [k]: e.target.checked }); toast('Kaydedildi'); }
+  if (k) await saveSetting({ [k]: e.target.checked });
 });
 api.update.onStatus((u) => {
   const prev = S.update.state;
@@ -670,8 +705,18 @@ async function loadInstalled() {
   if (S.page !== 'assistant') renderPage();
 }
 
+// Arayüz hatalarını günlüğe yaz
+window.addEventListener('error', (e) => api.app.log('error', `${e.message} @ ${e.filename}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => api.app.log('error', 'Promise: ' + (e.reason?.stack || e.reason)));
+
 (async function init() {
   S.settings = await api.settings.get();
+  const ui = await api.ui.get().catch(() => ({}));
+  if (ui.cat) S.cat = ui.cat;
+  if (ui.dashTab) S.dashTab = ui.dashTab;
+  if (ui.opts) S.opts = { ...S.opts, ...ui.opts };
+  if (ui.page && ui.page !== 'assistant') S.page = ui.page;
+  S.chat = await api.chat.get().catch(() => []);
   document.documentElement.dataset.theme = S.settings.theme;
   S.update = await api.update.status();
   S.version = S.update.current;
