@@ -160,3 +160,7 @@
   .hero:has(.hero-art) .hero-stats { order: 3; }
   .hero:has(.hero-art) .controls { order: 4; }
 }
+/* Koyu temada panel düğmeleri koyu zeminde kaybolmasın */
+:root[data-theme="dark"] .ctl { background: rgba(255, 255, 255, .10); }
+:root[data-theme="dark"] .ctl.off { background: rgba(255, 255, 255, .04); color: rgba(255, 255, 255, .55); }
+:root[data-theme="dark"] .ctl.go { background: var(--danger); }

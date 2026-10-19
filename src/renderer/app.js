@@ -221,7 +221,7 @@ PAGES.dashboard = () => {
   const orbiters = [
     { icon: 'chip', color: '#7b5cff' }, { icon: 'package', color: '#ff5f8f' },
     { icon: 'gpu', color: '#ff8a3d' }, { icon: 'code', color: '#2f80ff' }, { icon: 'light', color: '#f5b300' },
-    { icon: 'usb', color: '#16a37f' }, { icon: 'sparkles', color: '#b04cff' }, { icon: 'download', color: '#111114' }, { icon: 'windows', color: '#0078d4' },
+    { icon: 'usb', color: '#16a37f' }, { icon: 'sparkles', color: '#b04cff' }, { icon: 'download', color: '#6b6b80' }, { icon: 'windows', color: '#0078d4' },
   ];
   const ctl = (key, icon, label) => `<button class="ctl ${S.opts[key] ? '' : 'off'}" data-opt="${key}" title="${label}" ${S.running ? 'disabled' : ''}>${I(icon)}<span>${label}</span></button>`;
   const waveBars = Array.from({ length: 44 }, (_, i) => `<i style="height:${8 + Math.round(Math.abs(Math.sin(i * 1.7) * 22))}px;animation-delay:${(i % 8) * 0.08}s"></i>`).join('');
