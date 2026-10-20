@@ -7,7 +7,7 @@
 // "Custom" modu her yazmada cihaz hafızasına kaydettiği için ASLA animasyonda kullanılmaz.
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const { Client } = require('openrgb-sdk');
 const store = require('./store');
@@ -530,6 +530,36 @@ class RGB extends EventEmitter {
       const perLed = m.colorMode === 1 || (m.colorMode === 2 && !m.colorMax) || this.soft.has(d.deviceId);
       return { id: d.deviceId, mode: m.name, hardwareAnim: !perLed, colors: perLed ? d.colors.filter((_, i) => i % step === 0).map(hex) : m.colors.map(hex) };
     });
+  }
+
+  /**
+   * Başka bir ışık denetleyicisi cihazları ele geçirmiş mi? (salt okunur denetim)
+   * Windows "Dinamik Aydınlatma" açıkken Logitech LampArray hizmeti fareyi Windows'a bağlar ve
+   * Windows renkleri sürekli yazar; OpenRGB'nin doğrudan (Direct) yazdığı renkler fareye ulaşmaz.
+   */
+  async conflicts() {
+    if (this.conflictCache && Date.now() - this.conflictCache.at < 30000) return this.conflictCache.list;
+    const run = (file, args) => new Promise((res) => execFile(file, args, { windowsHide: true, timeout: 5000 }, (e, out) => res(e ? '' : String(out))));
+    const list = [];
+    const [reg, devs, svc] = await Promise.all([
+      run('reg', ['query', 'HKCU\\Software\\Microsoft\\Lighting', '/v', 'AmbientLightingEnabled']),
+      run('reg', ['query', 'HKCU\\Software\\Microsoft\\Lighting\\Devices']),
+      run('sc', ['query', 'logi_lamparray_service']),
+    ]);
+    const dynamicOn = /AmbientLightingEnabled\s+REG_DWORD\s+0x1\b/i.test(reg);
+    const hasDevice = /Lighting\\Devices\\/i.test(devs);
+    if (dynamicOn && hasDevice) {
+      const logi = /RUNNING/i.test(svc);
+      list.push({
+        id: 'dynamic-lighting',
+        title: 'Windows Dinamik Aydınlatma ışıkları kontrol ediyor',
+        text: logi
+          ? 'Logitech LampArray hizmeti fareyi Windows\'a bağlamış; Windows renkleri sürekli yazdığı için Orbit\'in fareye gönderdiği renkler görünmeyebilir. Ayarlar > Kişiselleştirme > Dinamik Aydınlatma\'da cihazın denetimini kapat.'
+          : 'Windows bazı ışıklı cihazları kendisi yönetiyor; Orbit\'in renkleri bu cihazlarda görünmeyebilir. Ayarlar > Kişiselleştirme > Dinamik Aydınlatma\'da cihazın denetimini kapat.',
+      });
+    }
+    this.conflictCache = { at: Date.now(), list };
+    return list;
   }
 
   shutdown() {

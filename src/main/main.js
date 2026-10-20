@@ -166,7 +166,8 @@ handle('system:relaunchAdmin', async () => {
   app.quit();
 });
 handle('system:restart', () => runPS('shutdown /r /t 15 /c "Orbit: kurulum tamamlandı, bilgisayar yeniden başlatılıyor."'));
-handle('shell:open', (url) => { if (/^https:\/\//.test(url)) return shell.openExternal(url); throw new Error('Geçersiz bağlantı'); });
+// Yalnızca https ve tek bir Windows ayar sayfası (Dinamik Aydınlatma) açılabilir
+handle('shell:open', (url) => { if (/^https:\/\//.test(url) || url === 'ms-settings:personalization-lighting') return shell.openExternal(url); throw new Error('Geçersiz bağlantı'); });
 // Yalnızca yerel ağdaki ESP32 paneli (http://192.168.x.x / 10.x / 172.16-31.x) açılabilir
 handle('shell:open-local', (url) => { if (/^http:\/\/(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))[\d.]*\/\?t=[0-9a-f]+$/.test(url)) return shell.openExternal(url); throw new Error('Geçersiz yerel adres'); });
 handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, logs: log.dir(), electron: process.versions.electron }));
@@ -218,6 +219,17 @@ handle('drivers:recommend', async () => {
   return recs.map(({ match, ...r }) => ({ ...r, status: inventory.statusOf({ ...r, match }) }));
 });
 handle('drivers:scan', () => drivers.scanWindowsUpdate());
+// AMD resmi sayfasındaki en güncel paket sürümleri (1 saat önbellek; yalnızca okuma, indirme yok)
+let amdLatest = null;
+handle('drivers:amd-latest', async () => {
+  if (amdLatest && Date.now() - amdLatest.at < 3600000) return amdLatest.data;
+  const amd = require('./services/vendor-amd');
+  const sys = await system.getSystemInfo();
+  const [gpu, chipset] = await Promise.allSettled([amd.resolve('gpu', sys), amd.resolve('chipset', sys)]);
+  const pick = (r) => (r.status === 'fulfilled' ? { version: r.value.version, size: r.value.size } : { error: r.reason.message });
+  amdLatest = { at: Date.now(), data: { gpu: pick(gpu), chipset: pick(chipset) } };
+  return amdLatest.data;
+});
 handle('drivers:installed', (force) => drivers.installedDrivers(force));
 
 // ---------- Kurulum ----------
@@ -349,6 +361,7 @@ handle('rgb:connect', () => rgb.connect());
 handle('rgb:refresh', async () => { await rgb.refresh(); return rgb.status(); });
 handle('rgb:apply', (profile, deviceId) => rgb.apply(profile, deviceId));
 handle('rgb:live', () => rgb.live());
+handle('rgb:conflicts', () => rgb.conflicts());
 handle('rgb:power', (on) => rgb.power(on));
 handle('rgb:exclude', (id, ex) => rgb.setExcluded(id, ex));
 handle('rgb:native', (deviceId, mode, opts) => rgb.applyNative(deviceId, mode, opts));

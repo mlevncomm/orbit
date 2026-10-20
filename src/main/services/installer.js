@@ -17,11 +17,12 @@ const { pipeline } = require('stream/promises');
 const { runProcess, refreshPath } = require('./ps');
 const U = require('./install-utils');
 const drivers = require('./drivers');
+const amd = require('./vendor-amd');
 const store = require('./store');
 const log = require('./log');
 
 const ACTIVE = new Set(['queued', 'running']);
-const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade'];
+const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade', 'amdKind'];
 
 class Installer extends EventEmitter {
   constructor() {
@@ -70,6 +71,7 @@ class Installer extends EventEmitter {
       const it = Object.fromEntries(PLAIN.map((k) => [k, raw[k]]));
       if (activeKeys.has(it.key) || (it.wingetId && activeIds.has(it.wingetId.toLowerCase()))) continue; // çakışan kurulum yok
       if (it.source === 'winget' && !U.safeWingetId(it.wingetId)) { this.emit('progress', { key: it.key, name: it.name, status: 'error', message: 'Geçersiz paket kimliği' }); continue; }
+      if (it.source === 'amd' && !['gpu', 'chipset'].includes(it.amdKind)) { this.emit('progress', { key: it.key, name: it.name, status: 'error', message: 'Geçersiz AMD paketi' }); continue; }
       if (it.source === 'npm' && !U.safeNpmName(it.npmPkg)) { this.emit('progress', { key: it.key, name: it.name, status: 'error', message: 'Geçersiz npm paket adı' }); continue; }
       // Aynı anahtarlı eski (bitmiş) kaydı kuyruktan kaldır
       this.queue = this.queue.filter((q) => q.key !== it.key);
@@ -145,6 +147,7 @@ class Installer extends EventEmitter {
       case 'url': return this.download(item);
       case 'npm': return this.npm(item);
       case 'wudrivers': return this.wuDrivers(item);
+      case 'amd': return this.amdPackage(item);
       default: throw new Error('Bu kurulum türü desteklenmiyor: ' + item.source);
     }
   }
@@ -263,12 +266,85 @@ class Installer extends EventEmitter {
     };
   }
 
+  /**
+   * AMD resmi paketi (Adrenalin / Chipset Software): amd.com'dan güncel bağlantı → indirme →
+   * imza + imzalayan denetimi → geri yükleme noktası → sessiz kurulum. Doğrulama verify()'da.
+   */
+  async amdPackage(item) {
+    if (!['gpu', 'chipset'].includes(item.amdKind)) throw new Error('Bilinmeyen AMD paketi');
+    this.emitItem(item, { phase: 'prepare', percent: null, message: "AMD'nin resmi sayfasında güncel sürüm aranıyor…" });
+    const sys = await require('./system').getSystemInfo();
+    const pkg = await amd.resolve(item.amdKind, sys);
+    item.expectVersion = pkg.version;
+    const sizeMB = (pkg.size / 1048576).toFixed(0);
+    log.info(`AMD ${item.amdKind}: ${pkg.file} (${sizeMB} MB) · ${pkg.page}`);
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'orbit-amd-'));
+    const file = path.join(dir, pkg.file.replace(/[^\w.-]/g, '_'));
+    try {
+      this.emitItem(item, { phase: 'download', percent: 0, message: `v${pkg.version} indiriliyor · ${sizeMB} MB` });
+      const res = await fetch(pkg.url, { headers: amd.DL_HEADERS });
+      if (!res.ok) throw new Error(`İndirme başarısız: HTTP ${res.status}`);
+      const total = +res.headers.get('content-length') || pkg.size;
+      let got = 0, last = 0;
+      const body = Readable.fromWeb(res.body);
+      body.on('data', (c) => {
+        got += c.length;
+        if (Date.now() - last < 500) return;
+        last = Date.now();
+        this.emitItem(item, { percent: total ? Math.min(99, Math.round((got / total) * 100)) : null, message: `v${pkg.version} indiriliyor ${(got / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB` });
+      });
+      await pipeline(body, fs.createWriteStream(file));
+      if (total && fs.statSync(file).size !== total) throw new Error('İndirme eksik kaldı (boyut tutmuyor)');
+
+      // İmza geçerli VE imzalayan AMD olmalı; değilse dosya çalıştırılmaz
+      this.emitItem(item, { phase: 'verify', percent: null, message: 'Dijital imza denetleniyor…' });
+      const sig = await new Promise((resolve) => {
+        const p = spawn('powershell.exe', ['-NoProfile', '-Command', `$s = Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; "$($s.Status)|$($s.SignerCertificate.Subject)"`], { windowsHide: true });
+        let o = ''; p.stdout.on('data', (d) => (o += d)); p.on('close', () => resolve(o.trim()));
+      });
+      const [status, subject = ''] = sig.split('|');
+      if (status !== 'Valid' || !/O=Advanced Micro Devices/i.test(subject)) {
+        log.warn(`AMD paketi imza denetiminden geçmedi: ${sig}`);
+        return { status: 'error', message: `İmza doğrulanamadı (${status || 'bilinmiyor'}) — güvenlik için kurulmadı`, error: 'imza' };
+      }
+
+      this.emitItem(item, { phase: 'prepare', percent: null, message: 'İmza geçerli (Advanced Micro Devices) · geri yükleme noktası oluşturuluyor…' });
+      const rp = await drivers.createRestorePoint(`Orbit: AMD ${item.amdKind === 'gpu' ? 'Adrenalin' : 'Chipset'} ${pkg.version} öncesi`).catch((e) => ({ ok: false, message: e.message }));
+      log.info('Geri yükleme noktası: ' + rp.message);
+      item.restoreNote = rp.message;
+
+      this.emitItem(item, { phase: 'install', percent: null, message: item.amdKind === 'gpu'
+        ? `Adrenalin ${pkg.version} kuruluyor… ekran birkaç kez kararabilir (5-15 dk)`
+        : `Chipset Software ${pkg.version} kuruluyor…` });
+      const r = await runProcess(file, amd.silentArgs(item.amdKind), { onSpawn: (c) => (this.child = c) });
+      const ex = U.explainExit(r.code);
+      log.info(`AMD ${item.amdKind} kurulum çıkışı ${r.code} (${ex.kind})`);
+      if (ex.kind === 'error') return { status: 'error', message: `${ex.text} · ${rp.message}`, error: ex.text };
+      // Sürücü paketleri tamamlanmak için genelde yeniden başlatma ister
+      item.reboot = true;
+      return { status: 'done', message: `${ex.text} · ${rp.message}` };
+    } finally {
+      fs.rm(dir, { recursive: true, force: true }, () => {});
+    }
+  }
+
   // ---------- Doğrulama ----------
 
   /** Kurulumdan sonra programın gerçekten kurulu olduğunu ve çalıştığını kontrol eder */
   async verify(item, res) {
     if (item.source === 'wudrivers') return res;
     this.emitItem(item, { phase: 'verify', percent: null, message: 'Doğrulanıyor…' });
+    if (item.source === 'amd') {
+      if (res.status === 'error') return res;
+      const inventory = require('./inventory');
+      inventory.invalidate();
+      const inv = await inventory.get(true).catch(() => null);
+      const prog = inv?.programs.find((x) => amd.verifyName(item.amdKind).test(x.name));
+      const ok = prog && (!item.expectVersion || !prog.version || amd.cmpVer(prog.version, item.expectVersion) >= 0 || item.amdKind === 'gpu');
+      if (ok) return { ...res, status: 'done', verified: true, version: prog.version, message: `Kuruldu · ${prog.name}${prog.version ? ' v' + prog.version : ''} · yeniden başlatma önerilir · ${item.restoreNote || ''}` };
+      return { ...res, status: 'warn', verified: false, message: `Kurulum komutu bitti ama ${prog ? `sürüm ${prog.version} (beklenen ${item.expectVersion})` : 'program kayıt defterinde bulunamadı'} · yeniden başlattıktan sonra tekrar kontrol et` };
+    }
     const inventory = require('./inventory');
     const catalog = require('./catalog');
     const app = catalog.getCatalog().apps.find((a) => a.key === item.key || (item.wingetId && a.wingetId?.toLowerCase() === item.wingetId.toLowerCase()))

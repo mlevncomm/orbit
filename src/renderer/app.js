@@ -316,8 +316,10 @@ PAGES.drivers = () => {
     const installed = st?.installed;
     return `<div class="rec-item">
       ${appIcon(r)}
-      <div class="txt"><span class="kicker">${h(r.target)}</span><br><b>${h(r.name)}</b>${installed ? ` <span class="badge">Kurulu${st.version ? ' · v' + h(shortVer(st.version)) : ''}</span>` : ''}<p>${h(r.desc)}</p></div>
-      ${r.source === 'winget'
+      <div class="txt"><span class="kicker">${h(r.target)}</span><br><b>${h(r.name)}</b>${installed ? ` <span class="badge">Kurulu${st.version ? ' · v' + h(shortVer(st.version)) : ''}</span>` : ''}${amdNote(r, st)}<p>${h(r.desc)}</p></div>
+      ${r.source === 'amd'
+        ? `<button class="btn ${installed && !amdNewer(r, st) ? '' : 'primary'} sm" data-install-amd="${r.key}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job)) : !installed ? 'Kur' : amdNewer(r, st) ? 'Güncelle' : 'Yeniden kur'}</button>`
+        : r.source === 'winget'
         ? `<button class="btn ${installed && !st.available ? '' : 'primary'} sm" data-install-rec="${r.key}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I(installed ? 'refresh' : 'download')}${job ? h(statusLabel(job)) : installed ? (st.available ? 'Güncelle' : 'Yeniden kur') : 'Kur'}</button>`
         : `<button class="btn sm" data-open="${h(r.url)}">${I('external')}${installed ? 'Güncelini kontrol et' : 'Resmi sayfa'}</button>`}
     </div>`;
@@ -391,7 +393,29 @@ PAGES.drivers = () => {
     <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Üretici araçları</h3><p class="sub">Algılanan donanıma göre; kurulu olanlar işaretli</p></div></div><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div><div class="table-wrap">${installedTable}</div></div>`;
 };
+/** AMD paketinin resmi sayfadaki güncel sürümü (öneri kartında) */
+const amdLatestOf = (r) => S.amdLatest?.[r.amdKind];
+const amdNewer = (r, st) => {
+  const v = amdLatestOf(r)?.version;
+  if (!v || !st?.version) return false;
+  const a = v.split('.').map(Number), b = String(st.version).split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return false;
+};
+function amdNote(r, st) {
+  if (r.source !== 'amd') return '';
+  const l = amdLatestOf(r);
+  if (!S.amdLatest) return ' <span class="badge star">güncel sürüm denetleniyor…</span>';
+  if (!l || l.error) return ` <span class="badge fw">${h(l?.error || 'AMD sayfası okunamadı')}</span>`;
+  return ` <span class="badge ${!st?.installed || amdNewer(r, st) ? 'upd' : ''}">amd.com: v${h(l.version)} · ${(l.size / 1048576).toFixed(0)} MB</span>`;
+}
+
 PAGES.driversAfter = () => {
+  if (!S.amdLatest && !S.amdLoading && S.recs.some((r) => r.source === 'amd')) {
+    S.amdLoading = true;
+    api.drivers.amdLatest().then((x) => { S.amdLatest = x; }).catch((e) => { S.amdLatest = { gpu: { error: e.message }, chipset: { error: e.message } }; })
+      .finally(() => { S.amdLoading = false; if (S.page === 'drivers') renderPage(); });
+  }
   if (!S.drivers && !S.driversLoading) loadDrivers();
   if (!S.wu && !S.scanning && !S.wuAuto) { S.wuAuto = true; scanWU(); }
 };
@@ -643,7 +667,7 @@ async function startInstall(items, label) {
     else { S.feed = S.feed.filter((f) => !(f.type === 'job' && f.key === it.key)); pushFeed({ type: 'job', key: it.key }); }
   });
   pushFeed({ type: 'me', text: label || `${items.length} öğeyi kur` });
-  const plain = items.map(({ key, name, source, wingetId, url, args, npmPkg, ids, color }) => ({ key, name, source, wingetId, url, args, npmPkg, ids, color }));
+  const plain = items.map(({ key, name, source, wingetId, url, args, npmPkg, ids, color, amdKind }) => ({ key, name, source, wingetId, url, args, npmPkg, ids, color, amdKind }));
   await safe(() => api.install.run(plain), 'Kurulum başlatılamadı');
 }
 
@@ -778,7 +802,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
+  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
   if (!t) return;
   const d = t.dataset;
 
@@ -810,6 +834,19 @@ document.addEventListener('click', async (e) => {
   if (d.themeSet) return setTheme(d.themeSet);
   if (d.open) return safe(() => api.system.open(d.open));
   if (d.installRec) { const r = S.recs.find((x) => x.key === d.installRec); return startInstall([r], `${r.name} kur`); }
+  if (d.installAmd) {
+    const r = S.recs.find((x) => x.key === d.installAmd);
+    const l = amdLatestOf(r);
+    const gpu = r.amdKind === 'gpu';
+    const msg = `${r.name}${l?.version ? ' v' + l.version : ''} kurulsun mu?\n\n`
+      + `• Kaynak: yalnızca amd.com (${l?.size ? (l.size / 1048576).toFixed(0) + ' MB' : 'boyut bilinmiyor'})\n`
+      + `• İmza denetlenir: imzalayan "Advanced Micro Devices" değilse kurulmaz\n`
+      + `• Kurulumdan önce sistem geri yükleme noktası denenir\n`
+      + (gpu ? '• Ekran sürücüsü değişirken ekran birkaç kez kararabilir; açık oyun/video varsa kapat\n' : '')
+      + '• Bitince yeniden başlatma önerilir (Orbit kendisi başlatmaz)';
+    if (!confirm(msg)) return;
+    return startInstall([r], `${r.name} kur`);
+  }
   if (d.wuAll !== undefined) { S.wuSel = t.checked ? new Set(S.wu.filter((x) => !x.firmware).map((x) => x.id)) : new Set(); return renderPage(); }
   if (d.wu) { t.checked ? S.wuSel.add(d.wu) : S.wuSel.delete(d.wu); return renderPage(); }
   if (d.suggest) return sendChat(d.suggest);

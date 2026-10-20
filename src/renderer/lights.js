@@ -11,6 +11,7 @@ const L = {
   pending: null,     // uygulama sürerken gelen son istek
   liveTimer: null,
   live: {},          // cihaz id -> son okunan renkler
+  conflicts: [],     // ışıkları ele geçiren başka denetleyiciler (Windows Dinamik Aydınlatma)
 };
 
 const DEVICE_ICON = { 'Klavye': 'keyboard', 'Fare': 'mouse', 'RAM': 'memory', 'Ekran Kartı': 'gpu', 'Anakart': 'board', 'Kasa': 'box', 'LED Şerit': 'light', 'Soğutucu': 'fan', 'Kulaklık': 'headphones' };
@@ -136,6 +137,7 @@ PAGES.lights = () => {
       <button class="power ${isOff ? '' : 'on'}" data-rgb-power="${isOff ? 1 : 0}" ${dis} title="${isOff ? 'Işıkları aç' : 'Işıkları kapat'}">${L.applying ? '<span class="spinner"></span>' : I('power', 26)}</button>
     </section>
 
+    ${L.conflicts.map((c) => `<div class="banner">${I('alert')}<p><b>${h(c.title)}.</b> ${h(c.text)}</p><button class="btn primary sm" data-open="ms-settings:personalization-lighting">Ayarı aç</button><button class="btn sm" data-rgb="recheck">Tekrar kontrol et</button></div>`).join('')}
     <div class="devices">${devices}</div>
     ${devPanel}
 
@@ -186,11 +188,20 @@ PAGES.lightsAfter = () => {
   document.querySelectorAll('[data-rgb-exsw]').forEach((el) => el.addEventListener('change', () => setExcluded(+el.dataset.rgbExsw, !el.checked)));
   paintLive();
   startLivePoll();
+  if (!L.conflictsAt || Date.now() - L.conflictsAt > 30000) loadConflicts();
 };
 
 function refreshDraftPreview() {
   const box = document.querySelector('.studio .rgb-prev.tall');
   if (box) box.outerHTML = rgbPreview(L.draft, 'tall');
+}
+
+async function loadConflicts() {
+  L.conflictsAt = Date.now();
+  const list = await api.rgb.conflicts().catch(() => []);
+  const changed = JSON.stringify(list) !== JSON.stringify(L.conflicts);
+  L.conflicts = list;
+  if (changed && S.page === 'lights') renderPage();
 }
 
 async function autoConnect() {
@@ -296,6 +307,7 @@ document.addEventListener('click', async (e) => {
       return renderPage();
     }
     case 'connect': return autoConnect();
+    case 'recheck': L.conflictsAt = 0; await loadConflicts(); return toast(L.conflicts.length ? 'Çakışma hâlâ sürüyor' : 'Çakışma yok, ışıklar Orbit\'te');
     case 'refresh': return rgbRun(() => api.rgb.refresh());
     case 'swap': L.draft.colors.reverse(); saveDraft(); renderPage(); return liveApply();
     case 'save': {

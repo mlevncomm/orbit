@@ -131,13 +131,20 @@ function vendorRecommendations(sys) {
     recs.push({ key: 'drv_nvidia', name: 'NVIDIA App', target: 'Ekran Kartı', color: '#76b900', desc: 'GeForce Game Ready sürücülerini indirir ve güncel tutar.', source: 'winget', wingetId: 'Nvidia.NVIDIAApp', auto: true });
   }
   if (/amd|radeon/i.test(gpuNames)) {
-    recs.push({ key: 'drv_amdgpu', name: 'AMD Adrenalin', target: 'Ekran Kartı', color: '#ed1c24', desc: 'Radeon için en güncel sürücü. AMD sessiz paket sunmadığı için resmi Auto-Detect sayfası açılır; temel sürücü Windows Update ile otomatik kurulur.', source: 'link', url: 'https://www.amd.com/en/support/download/drivers.html', auto: false });
+    const amd = require('./vendor-amd');
+    const radeon = (sys?.gpus || []).map((g) => g.name).find((n) => /radeon/i.test(n));
+    recs.push(amd.gpuPage(radeon)
+      ? { key: 'drv_amdgpu', name: 'AMD Software: Adrenalin', target: 'Ekran Kartı', color: '#ed1c24', desc: `${radeon} için AMD'nin güncel WHQL sürücüsü ve Adrenalin. amd.com'dan indirilir, AMD imzası doğrulanır, öncesinde geri yükleme noktası alınır.`, source: 'amd', amdKind: 'gpu', auto: false, page: amd.gpuPage(radeon) }
+      : { key: 'drv_amdgpu', name: 'AMD Adrenalin', target: 'Ekran Kartı', color: '#ed1c24', desc: 'Bu Radeon modeli için otomatik paket yok; resmi Auto-Detect sayfası açılır.', source: 'link', url: 'https://www.amd.com/en/support/download/drivers.html', auto: false });
   }
   if (/intel/i.test(gpuNames) || /intel/i.test(cpu)) {
     recs.push({ key: 'drv_intel', name: 'Intel Driver & Support Assistant', target: /intel/i.test(gpuNames) ? 'Ekran Kartı / Yonga Seti' : 'Yonga Seti', color: '#0071c5', desc: 'Intel grafik, Wi-Fi, Bluetooth ve yonga seti sürücülerini algılar ve günceller.', source: 'winget', wingetId: 'Intel.IntelDriverAndSupportAssistant', auto: true });
   }
   if (/amd|ryzen/i.test(cpu)) {
-    recs.push({ key: 'drv_amdchipset', name: 'AMD Yonga Seti Sürücüsü', target: 'İşlemci / Yonga Seti', color: '#111111', desc: `${cpu} için güç planı ve yonga seti sürücüsü. Resmi indirme sayfası açılır.`, source: 'link', url: 'https://www.amd.com/en/support/download/drivers.html', auto: false });
+    const amd = require('./vendor-amd');
+    recs.push(amd.chipsetPage(board)
+      ? { key: 'drv_amdchipset', name: 'AMD Chipset Software', target: 'İşlemci / Yonga Seti', color: '#111111', desc: `${cpu} ve ${board} için güç planı ve yonga seti sürücüleri. amd.com'dan indirilir, AMD imzası doğrulanır, öncesinde geri yükleme noktası alınır.`, source: 'amd', amdKind: 'chipset', auto: false, page: amd.chipsetPage(board) }
+      : { key: 'drv_amdchipset', name: 'AMD Yonga Seti Sürücüsü', target: 'İşlemci / Yonga Seti', color: '#111111', desc: `${cpu} için güç planı ve yonga seti sürücüsü. Resmi indirme sayfası açılır.`, source: 'link', url: 'https://www.amd.com/en/support/download/drivers.html', auto: false });
   }
   if (board) {
     let url = `https://www.google.com/search?q=${enc(`${sys.board.vendor} ${board} drivers support`)}`;
