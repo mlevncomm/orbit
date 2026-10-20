@@ -44,6 +44,12 @@ const NATIVE = {
   wave: [/^color wave$/i, /^color shift$/i, /^visor$/i, /wave/i, /breath/i],
 };
 const ANIMATED = new Set(['breathing', 'pulse', 'spectrum', 'rainbow', 'wave']);
+// Doğrudan (Direct) modda yazılım animasyonunu GÖSTEREMEYEN cihazlar. Gerçek donanımda doğrulandı
+// (G203 Lightsync, 20.10.2026): fare yalnızca ilk renk yazmasını gösteriyor, ardından gelen sürekli
+// güncellemeleri yok sayıyor; donanım "Breathing" modu da OpenRGB üzerinden çalışmıyor.
+// Bunlara animasyon yerine görünümün rengi tek seferde sabit uygulanır (gökkuşağı/döngü donanımda kalır).
+const NO_SOFT_ANIM = [/logitech g203/i];
+const noSoftAnim = (d) => NO_SOFT_ANIM.some((re) => re.test(d.name || ''));
 // Donanım modunun efekti doğru renklerle gösterebilmesi için gereken en az renk sayısı
 const COLORS_NEEDED = { breathing: 1, pulse: 1, wave: 2 };
 
@@ -457,7 +463,7 @@ while ($true) {
 
     // 2) Akıcı yazılım animasyonu: yalnızca gerçek Direct modu olan, hızlı veri yolundaki cihazlar.
     //    SMBus (RAM vb.) saniyede birkaç yazmayı kaldıramaz → takılır; onlara sabit geçiş uygulanır.
-    if (animated && direct && !slowBus(d)) { await this.startSoft(d, direct, p); return; }
+    if (animated && direct && !slowBus(d) && !noSoftAnim(d)) { await this.startSoft(d, direct, p); return; }
 
     // 3) Sabit: renk / kapalı / animasyonsuz cihazlarda efektin renkleriyle tek seferlik geçiş.
     //    Static > hafızaya kaydeden per-LED mod (RAM "Custom", klavye "Custom") > Direct
@@ -657,3 +663,4 @@ while ($true) {
 
 module.exports = new RGB();
 module.exports.slowBus = slowBus;
+module.exports.noSoftAnim = noSoftAnim;

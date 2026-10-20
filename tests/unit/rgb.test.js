@@ -35,11 +35,12 @@ test('renk dalgası: 2 renk alan donanım modu varsa donanım (RAM → Color Wav
   assert.deepEqual(um.mode.colors, [{ red: 0, green: 229, blue: 192 }, { red: 123, green: 47, blue: 247 }]);
 });
 
-test('renk dalgası: renk almayan "Wave" kullanılmaz, Direct varsa yazılım (fare)', async () => {
-  const r = await applyTo(F.MOUSE, { effect: 'wave' });
+test('renk dalgası: renk almayan "Wave" kullanılmaz, Direct varsa yazılım (USB anakart)', async () => {
+  const r = await applyTo(F.BOARD, { effect: 'wave' });
   assert.equal(r.applied.method, 'Yazılım');
   assert.ok(r.soft);
-  assert.ok(!r.calls.some((c) => c.fn === 'updateMode' && c.mode.id === 5), 'Logitech Wave (gökkuşağı) seçilmemeli');
+  const m = await applyTo(F.MOUSE, { effect: 'wave' });
+  assert.ok(!m.calls.some((c) => c.fn === 'updateMode' && c.mode.id === 5), 'Logitech Wave (gökkuşağı) seçilmemeli');
 });
 
 test('renk dalgası: Direct olmayan klavye ASLA animasyona alınmaz, tek seferlik renk geçişi', async () => {
@@ -68,7 +69,7 @@ test('kapalı: farede Off modu', async () => {
 });
 
 test('nefes: renk almayan Logitech Breathing yerine yazılım; klavyede donanım', async () => {
-  assert.equal((await applyTo(F.MOUSE, { effect: 'breathing' })).applied.method, 'Yazılım');
+  assert.equal((await applyTo(F.BOARD, { effect: 'breathing' })).applied.method, 'Donanım');
   const kb = await applyTo(F.KEYBOARD, { effect: 'breathing' });
   assert.equal(kb.applied.mode, 'Breathing');
 });
@@ -142,4 +143,18 @@ test('cihaz listesi değişince eski numara eşlemeleri silinir ve görünüm ye
   assert.equal(restored, 1);
   rgb.shutdown();
   rgb.client = null;
+});
+
+test('yazılım animasyonu göstermeyen fare (G203): animasyonlu görünümde rengi tek seferde sabit alır', async () => {
+  assert.equal(rgb.noSoftAnim(F.MOUSE), true);
+  assert.equal(rgb.noSoftAnim(F.BOARD), false);
+  for (const effect of ['wave', 'breathing', 'pulse']) {
+    const r = await applyTo(F.MOUSE, { effect, colors: ['#ff7a18', '#ff2e63'] });
+    assert.equal(r.soft, false, effect + ': döngü başlamamalı');
+    const leds = r.calls.filter((c) => c.fn === 'updateLeds');
+    assert.equal(leds.length, 1, effect + ': tek yazma');
+    assert.deepEqual(leds[0].colors[0], { red: 255, green: 122, blue: 24 });
+  }
+  // gökkuşağı donanım modunda kalır (gerçek farede çalıştığı görüldü)
+  assert.equal((await applyTo(F.MOUSE, { effect: 'rainbow' })).applied.mode, 'Wave');
 });
