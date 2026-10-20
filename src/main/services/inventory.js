@@ -36,7 +36,7 @@ const REGISTRY = `
   @(Get-ItemProperty $keys -ErrorAction SilentlyContinue |
     Where-Object { $_.DisplayName -and $_.SystemComponent -ne 1 -and -not $_.ParentKeyName -and $_.ReleaseType -notmatch 'Update|Hotfix' } |
     ForEach-Object { @{ name = [string]$_.DisplayName; version = [string]$_.DisplayVersion; publisher = [string]$_.Publisher;
-                        date = [string]$_.InstallDate; sizeMB = if ($_.EstimatedSize) { [math]::Round($_.EstimatedSize / 1024) } else { 0 } } }) |
+                        date = [string]$_.InstallDate; icon = [string]$_.DisplayIcon; sizeMB = if ($_.EstimatedSize) { [math]::Round($_.EstimatedSize / 1024) } else { 0 } } }) |
     ConvertTo-Json -Depth 3 -Compress
 `;
 
@@ -116,11 +116,14 @@ class Inventory extends EventEmitter {
     const family = (app.family || '').toLowerCase();
     let w = want && inv.wingetById[want];
     if (!w && family) w = inv.wingetById[ids.find((i) => i.startsWith(family))];
-    if (w) return { installed: true, version: w.version, available: w.source ? w.available : '', id: w.id };
-    if (app.match) {
-      const re = app.match instanceof RegExp ? app.match : new RegExp(app.match, 'i');
+    const re = app.match ? (app.match instanceof RegExp ? app.match : new RegExp(app.match, 'i')) : null;
+    if (w) {
+      const p = inv.programs.find((x) => (x.wingetId && x.wingetId.toLowerCase() === w.id.toLowerCase()) || (re && re.test(x.name)));
+      return { installed: true, version: w.version, available: w.source ? w.available : '', id: w.id, icon: p?.icon || '' };
+    }
+    if (re) {
       const p = inv.programs.find((x) => re.test(x.name));
-      if (p) return { installed: true, version: p.version, available: p.available, id: p.wingetId };
+      if (p) return { installed: true, version: p.version, available: p.available, id: p.wingetId, icon: p.icon || '' };
     }
     for (const f of app.files || []) {
       const full = f.replace(/%(\w+)%/g, (_, v) => process.env[v] || (v === 'USERPROFILE' ? os.homedir() : ''));

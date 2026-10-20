@@ -660,3 +660,15 @@ button.stat { cursor: pointer; }
 .rgb-prev::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06); pointer-events: none; }
 .tile-big { right: -22px; top: -22px; bottom: auto; opacity: .16; }
 .esp-grid { align-items: start; }
+
+/* Program simgeleri: gerçek Windows simgesi / marka logosu / baş harf */
+.app-ic { overflow: hidden; }
+.app-ic.real { background: var(--surface-2); padding: 6px; }
+.app-ic.real img { width: 100%; height: 100%; object-fit: contain; image-rendering: -webkit-optimize-contrast; }
+.app-ic.brand { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); padding: 11px; }
+.app-ic.brand svg { width: 100%; height: 100%; fill: currentColor; }
+.app-ic.brand.light { background: color-mix(in srgb, var(--brand) 30%, #3a3a44); }
+:root[data-theme="dark"] .app-ic.brand { background: color-mix(in srgb, var(--brand) 18%, var(--surface-2)); }
+/* çok koyu markalar (GitHub, Vercel, Epic…) koyu temada görünür kalsın */
+:root[data-theme="dark"] .app-ic.brand:not(.light) { color: color-mix(in srgb, var(--brand) 55%, #ffffff); }
+.job-head .app-ic.brand, .table.progs .app-ic.brand { padding: 7px; }

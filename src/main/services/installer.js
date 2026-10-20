@@ -22,7 +22,7 @@ const store = require('./store');
 const log = require('./log');
 
 const ACTIVE = new Set(['queued', 'running']);
-const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade', 'amdKind'];
+const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade', 'amdKind', 'wingetSource'];
 
 class Installer extends EventEmitter {
   constructor() {
@@ -155,14 +155,16 @@ class Installer extends EventEmitter {
   // ---------- Kaynaklar ----------
 
   async winget(item) {
-    const args = ['install', '--id', item.wingetId, '-e', '--source', 'winget', '--silent',
+    // Microsoft Store uygulamaları (ör. WhatsApp) yalnızca msstore kaynağında
+    const src = item.wingetSource === 'msstore' ? 'msstore' : 'winget';
+    const args = ['install', '--id', item.wingetId, '-e', '--source', src, '--silent',
       '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'];
     let phase = 'download';
     const tail = [];
     this.emitItem(item, { phase, percent: null, message: 'Paket bilgisi alınıyor…' });
     // winget, çıktısı yönlendirildiğinde indirme ilerlemesi YAZMIYOR (doğrulandı). Gerçek ilerleme için
     // kurulum dosyasının boyutu resmi adresinden alınır ve winget'in geçici klasöründeki dosya izlenir.
-    const meta = await resolveInstaller(item.wingetId).catch(() => null);
+    const meta = src === 'winget' ? await resolveInstaller(item.wingetId).catch(() => null) : null;
     const stopWatch = meta ? watchDownload(item.wingetId, meta, (bytes) => {
       if (phase !== 'download' || !bytes) return;
       const mb = (bytes / 1048576).toFixed(1);
@@ -192,7 +194,7 @@ class Installer extends EventEmitter {
       // Orbit yönetici olarak çalışır; bazı yükleyiciler (Spotify vb.) bunu reddeder → kullanıcı yetkisiyle yeniden dene
       log.info(`${item.wingetId}: yönetici bağlamı reddedildi, normal kullanıcı olarak deneniyor`);
       this.emitItem(item, { phase: 'install', percent: null, message: 'Yönetici bağlamı reddedildi · normal kullanıcı olarak kuruluyor…' });
-      const u = await runAsUser(['install', '--id', item.wingetId, '-e', '--source', 'winget', '--silent',
+      const u = await runAsUser(['install', '--id', item.wingetId, '-e', '--source', src, '--silent',
         '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--scope', 'user']);
       tail.push(...u.output.split(/\r?\n/).slice(-6));
       ex = u.code == null ? { kind: 'error', text: u.error || 'Kullanıcı olarak çalıştırılamadı' } : U.explainExit(u.code);

@@ -172,6 +172,27 @@ handle('shell:open', (url) => { if (/^https:\/\//.test(url) || url === 'ms-setti
 handle('shell:open-local', (url) => { if (/^http:\/\/(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))[\d.]*\/\?t=[0-9a-f]+$/.test(url)) return shell.openExternal(url); throw new Error('Geçersiz yerel adres'); });
 handle('app:info', () => ({ version: app.getVersion(), packaged: app.isPackaged, logs: log.dir(), electron: process.versions.electron }));
 handle('app:openLogs', () => shell.openPath(log.dir()));
+// Kurulu programların gerçek simgesi: kayıt defterindeki DisplayIcon ("C:\\yol\\app.exe,0") → PNG veri adresi.
+// Yalnızca diskte VAR OLAN .exe / .ico / .dll dosyaları okunur; sonuç bellekte önbelleklenir.
+const iconCache = new Map();
+handle('icons:files', async (list) => {
+  const out = {};
+  for (const raw of (Array.isArray(list) ? list : []).slice(0, 400)) {
+    if (typeof raw !== 'string' || raw.length > 400) continue;
+    if (iconCache.has(raw)) { out[raw] = iconCache.get(raw); continue; }
+    const file = raw.replace(/^"|"$/g, '').replace(/,\s*-?\d+$/, '').replace(/^"|"$/g, '').trim();
+    let url = null;
+    try {
+      if (path.isAbsolute(file) && /\.(exe|ico|dll)$/i.test(file) && fs.existsSync(file)) {
+        const img = await app.getFileIcon(file, { size: 'large' });
+        if (!img.isEmpty()) url = img.toDataURL();
+      }
+    } catch {}
+    iconCache.set(raw, url);
+    out[raw] = url;
+  }
+  return out;
+});
 ipcMain.on('app:log', (_e, level, msg) => (level === 'error' ? log.error('[arayüz] ' + msg) : log.info('[arayüz] ' + msg)));
 
 // ---------- Katalog ----------

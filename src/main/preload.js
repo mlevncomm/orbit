@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('orbit', {
   },
   selection: { get: () => call('selection:get'), set: (k) => call('selection:set', k) },
   profile: { export: () => call('profile:export'), import: () => call('profile:import') },
+  icons: { files: (list) => call('icons:files', list) },
   drivers: { recommend: () => call('drivers:recommend'), amdLatest: () => call('drivers:amd-latest'), scan: () => call('drivers:scan'), installed: (force) => call('drivers:installed', force) },
   bootstrap: { check: () => call('bootstrap:check'), repair: (a) => call('bootstrap:repair', a) },
   esp32: {

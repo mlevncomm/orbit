@@ -60,7 +60,37 @@ function hydrateIcons(root = document) {
     el.dataset.hydrated = '1';
   });
 }
-const appIcon = (a, size) => `<span class="app-ic" style="background:${h(a.color || '#111')}${size ? `;width:${size}px;height:${size}px` : ''}">${h(initials(a.name))}</span>`;
+/** Rengin açık olup olmadığı (logo zemini için) */
+const isLight = (hex) => { const n = parseInt(String(hex).replace('#', ''), 16); return ((n >> 16) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) > 200; };
+/**
+ * Program simgesi: kuruluysa Windows'taki gerçek simgesi, değilse markanın logosu (Simple Icons),
+ * o da yoksa marka renginde baş harfler.
+ */
+const appIcon = (a, size) => {
+  const dim = size ? `;width:${size}px;height:${size}px` : '';
+  const file = a.status?.icon || a.icon;
+  const real = file && S.fileIcons?.[file];
+  if (real) return `<span class="app-ic real" style="${dim.slice(1)}"><img src="${real}" alt=""></span>`;
+  const b = window.BRAND_ICONS?.[a.key];
+  if (b) {
+    const hex = '#' + b.h;
+    return `<span class="app-ic brand ${isLight(b.h) ? 'light' : ''}" style="--brand:${hex}${dim}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${b.p}"/></svg></span>`;
+  }
+  return `<span class="app-ic" style="background:${h(a.color || '#111')}${dim}">${h(initials(a.name))}</span>`;
+};
+
+/** Kurulu programların gerçek simgelerini (bir kez) yükler */
+async function loadFileIcons() {
+  const want = new Set();
+  for (const a of S.catalog.apps || []) if (a.status?.icon) want.add(a.status.icon);
+  for (const p of S.inv?.programs || []) if (p.icon) want.add(p.icon);
+  S.fileIcons = S.fileIcons || {};
+  const todo = [...want].filter((x) => !(x in S.fileIcons));
+  if (!todo.length) return;
+  const got = await api.icons.files(todo).catch(() => ({}));
+  Object.assign(S.fileIcons, got);
+  if (['apps', 'drivers', 'dashboard'].includes(S.page)) renderPage();
+}
 const boardName = (sys) => `${sys.board.vendor.replace(/\s*(Technology Co\., Ltd\.|COMPUTER INC\.|Co\., Ltd\.|Inc\.|Corporation)/gi, '')} ${sys.board.product}`;
 const isInstalled = (a) => !!a.status?.installed;
 const PALETTE = ['#6d5bd0', '#1a73e8', '#e0245e', '#13aa52', '#f58220', '#0b8a8a', '#7c3aed', '#c2410c', '#2563eb', '#be185d'];
@@ -442,7 +472,7 @@ PAGES.apps = () => {
       <div class="card"><div class="table-wrap"><table class="table progs"><thead><tr><th>Program</th><th>Sürüm</th><th>Yayıncı</th><th>Boyut</th><th></th></tr></thead><tbody>
       ${list.map((p) => {
         const job = p.wingetId && S.jobs.get('upg_' + p.wingetId);
-        return `<tr><td><div class="row" style="flex-wrap:nowrap">${appIcon({ name: p.name, color: colorFor(p.name) }, 30)}<div><b>${h(p.name)}</b>${p.wingetId ? `<br><small class="sub mono">${h(p.wingetId)}</small>` : p.store ? '<br><small class="sub">Microsoft Store</small>' : ''}</div></div></td>
+        return `<tr><td><div class="row" style="flex-wrap:nowrap">${appIcon({ name: p.name, color: colorFor(p.name), icon: p.icon }, 30)}<div><b>${h(p.name)}</b>${p.wingetId ? `<br><small class="sub mono">${h(p.wingetId)}</small>` : p.store ? '<br><small class="sub">Microsoft Store</small>' : ''}</div></div></td>
         <td><code>${h(shortVer(p.version) || '-')}</code></td><td class="sub">${h(p.publisher || '-')}</td><td class="sub">${p.sizeMB ? (p.sizeMB >= 1024 ? (p.sizeMB / 1024).toFixed(1) + ' GB' : p.sizeMB + ' MB') : '-'}</td>
         <td>${p.available ? `<button class="btn primary sm" data-upgrade="${h(p.wingetId)}" data-upgrade-name="${h(p.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job)) : `v${h(shortVer(p.available))}`}</button>` : p.wingetId ? `<span class="badge">Güncel</span>` : ''}</td></tr>`;
       }).join('')}
@@ -667,7 +697,7 @@ async function startInstall(items, label) {
     else { S.feed = S.feed.filter((f) => !(f.type === 'job' && f.key === it.key)); pushFeed({ type: 'job', key: it.key }); }
   });
   pushFeed({ type: 'me', text: label || `${items.length} öğeyi kur` });
-  const plain = items.map(({ key, name, source, wingetId, url, args, npmPkg, ids, color, amdKind }) => ({ key, name, source, wingetId, url, args, npmPkg, ids, color, amdKind }));
+  const plain = items.map(({ key, name, source, wingetId, wingetSource, url, args, npmPkg, ids, color, amdKind }) => ({ key, name, source, wingetId, wingetSource, url, args, npmPkg, ids, color, amdKind }));
   await safe(() => api.install.run(plain), 'Kurulum başlatılamadı');
 }
 
@@ -969,6 +999,7 @@ async function loadInstalled(force = false) {
   S.catalog = await api.catalog.get();
   S.installedLoaded = true;
   if (S.page !== 'assistant' && S.page !== 'lights') renderPage();
+  loadFileIcons();
 }
 async function loadDrivers(force = false) {
   S.driversLoading = true;

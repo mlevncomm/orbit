@@ -30,7 +30,10 @@ test('parseTable: 4 sütun (güncelleme sütunu yok) ve Türkçe başlık', () =
 
 test('statusOf: kimlik ailesi, görünen ad ve kurulu değil', () => {
   inventory.data = {
-    programs: [{ name: 'Python 3.15.0 (64-bit)', version: '3.15.150.0', wingetId: null, available: '' }],
+    programs: [
+      { name: 'Python 3.15.0 (64-bit)', version: '3.15.150.0', wingetId: null, available: '', icon: 'C:\\Python315\\python.exe' },
+      { name: 'Google Chrome', version: '155.0', wingetId: 'Google.Chrome', available: '', icon: '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",0' },
+    ],
     upgrades: [],
     wingetById: {
       'openjs.nodejs.22': { id: 'OpenJS.NodeJS.22', version: '22.11.0', available: '22.12.0', source: 'winget' },
@@ -38,9 +41,12 @@ test('statusOf: kimlik ailesi, görünen ad ve kurulu değil', () => {
     },
   };
   inventory.at = Date.now();
-  assert.deepEqual(inventory.statusOf({ wingetId: 'OpenJS.NodeJS.LTS', family: 'OpenJS.NodeJS' }), { installed: true, version: '22.11.0', available: '22.12.0', id: 'OpenJS.NodeJS.22' });
+  assert.deepEqual(inventory.statusOf({ wingetId: 'OpenJS.NodeJS.LTS', family: 'OpenJS.NodeJS' }), { installed: true, version: '22.11.0', available: '22.12.0', id: 'OpenJS.NodeJS.22', icon: '' });
   assert.equal(inventory.statusOf({ wingetId: 'Google.Chrome' }).installed, true);
   assert.equal(inventory.statusOf({ wingetId: 'Python.Python.3.14', family: 'Python.Python.3', match: /^Python 3\.\d+\.\d+ \(64-bit\)/i }).version, '3.15.150.0');
   assert.equal(inventory.statusOf({ wingetId: 'Mozilla.Firefox' }).installed, false);
+  // simge yolu kayıt defteri girdisinden gelir (winget kimliği ya da görünen adla eşleşir)
+  assert.match(inventory.statusOf({ wingetId: 'Google.Chrome' }).icon, /chrome\.exe/);
+  assert.match(inventory.statusOf({ wingetId: 'Python.Python.3.14', family: 'Python.Python.3', match: /^Python 3/i }).icon, /python\.exe/);
   assert.equal(inventory.statusOf({ wingetId: 'X.Y', files: ['C:/kesinlikle/yok.exe'] }).installed, false);
 });
