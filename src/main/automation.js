@@ -74,6 +74,10 @@ class Automation extends EventEmitter {
           return `Işıklar: ${next.name}`;
         },
       },
+      'lights.rescan': {
+        level: 'safe', label: 'Işık cihazlarını yeniden tara',
+        run: async () => { const st = await rgb.rescan('otomasyon'); return `Işık cihazları yeniden tarandı: ${st.devices.length} cihaz`; },
+      },
       'lights.preset': {
         level: 'safe', label: 'Işık görünümü seç', argFrom: () => presetsAll().map((p) => p.id),
         run: async (arg) => {

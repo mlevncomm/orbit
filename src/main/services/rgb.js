@@ -178,6 +178,7 @@ class RGB extends EventEmitter {
       await this.refresh();
       log.info(`OpenRGB bağlı, ${this.devices.length} cihaz`);
       this.watchDetection();
+      this.watchHotplug();
       this.emit('status');
       return this.status();
     })().finally(() => { this.connecting = null; });
@@ -214,6 +215,89 @@ class RGB extends EventEmitter {
       this.startLoop();
       this.emit('status');
     }).catch((e) => log.warn('RGB cihaz listesi yenilenemedi', e)), 800);
+  }
+
+  /**
+   * OpenRGB'ye cihazları yeniden taratır ve son görünümü geri uygular.
+   * OpenRGB tak-çıkarı kendisi fark etmez: fare yeniden takılınca ya da Windows cihazın
+   * bağlantısını yenileyince (Dinamik Aydınlatma aç/kapa, sürücü güncellemesi) eski, kopmuş
+   * bağlantıya yazmaya devam eder ve renkler cihaza ulaşmaz.
+   */
+  rescan(why = 'elle') {
+    return this.enqueue(async () => {
+      if (!this.client) return this.status();
+      log.info(`RGB yeniden tarama (${why})`);
+      this.stopLoop();
+      this.soft.clear();
+      this.applied.clear();
+      this.client.requestRescan();
+      // Tarama birkaç saniye sürer ve bu sürede liste boş görünebilir: sayı oturana kadar bekle
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      await sleep(3000);
+      let last = -1;
+      for (let i = 0; i < 20; i++) {
+        const n = await this.client.getControllerCount().catch(() => 0);
+        if (n > 0 && n === last) break;
+        last = n;
+        await sleep(1000);
+      }
+      await this.refresh();
+      log.info(`RGB yeniden tarandı: ${this.devices.length} cihaz`);
+      await this.restoreNow();
+      this.startLoop();
+      this.emit('status');
+      return this.status();
+    });
+  }
+
+  /**
+   * Windows'ta bir cihaz takılınca / çıkarılınca (ya da sürücüsü yeniden yüklenince) haber al.
+   * Yalnızca OpenRGB'nin yönettiği USB cihazlarının VID/PID'i eşleşirse yeniden taranır;
+   * USB bellek takmak ışıkları etkilemez.
+   */
+  watchHotplug() {
+    if (this.hotplug) return;
+    const ps = `
+$ErrorActionPreference = 'SilentlyContinue'
+Register-CimIndicationEvent -Query "SELECT * FROM __InstanceOperationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_PnPEntity'" -SourceIdentifier orbitpnp | Out-Null
+while ($true) {
+  $e = Wait-Event -SourceIdentifier orbitpnp -Timeout 3600
+  if ($e) {
+    $t = $e.SourceEventArgs.NewEvent
+    [Console]::Out.WriteLine($t.CimClass.CimClassName + '|' + $t.TargetInstance.PNPDeviceID)
+    [Console]::Out.Flush()
+    Remove-Event -EventIdentifier $e.EventIdentifier
+  }
+}`;
+    const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    this.hotplug = proc;
+    let buf = '';
+    proc.stdout.on('data', (d) => {
+      buf += d.toString();
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        const [kind, id = ''] = line.split('|');
+        if (!/Creation|Deletion/.test(kind)) continue;
+        const vp = id.match(/VID_([0-9A-F]{4})&PID_([0-9A-F]{4})/i);
+        if (!vp) continue;
+        const key = `VID_${vp[1]}&PID_${vp[2]}`.toUpperCase();
+        if (!this.knownUsb().has(key)) continue;
+        clearTimeout(this.hotplugTimer);
+        this.hotplugTimer = setTimeout(() => this.rescan(`${key} ${/Creation/.test(kind) ? 'takıldı' : 'çıkarıldı'}`).catch((e) => log.warn('RGB yeniden tarama', e)), 4000);
+      }
+    });
+    proc.on('exit', () => { if (this.hotplug === proc) this.hotplug = null; });
+  }
+
+  /** OpenRGB'nin yönettiği USB cihazlarının VID/PID'leri (konum: "HID: \\?\\HID#VID_046D&PID_C092...") */
+  knownUsb() {
+    const set = new Set();
+    for (const d of this.raw.values()) {
+      const m = String(d.location || '').match(/VID_([0-9A-F]{4})&PID_([0-9A-F]{4})/i);
+      if (m) set.add(`VID_${m[1]}&PID_${m[2]}`.toUpperCase());
+    }
+    return set;
   }
 
   /** İşleri sırayla çalıştırır */
@@ -563,6 +647,8 @@ class RGB extends EventEmitter {
   }
 
   shutdown() {
+    try { this.hotplug?.kill(); } catch {}
+    clearTimeout(this.hotplugTimer);
     this.stopLoop(); clearTimeout(this.reconnectTimer); clearTimeout(this.listTimer); this.watchTimers.forEach(clearTimeout);
     // Bekleyen hafıza kayıtlarını kapanmadan önce yaz
     for (const { t, run } of [...this.saveTimers.values()]) { clearTimeout(t); run(); }

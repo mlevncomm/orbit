@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "productName": "Orbit",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Format sonrası tek tıkla sürücü ve program kurulumu, RGB aydınlatma kontrolü ve kişisel AI asistanı",
   "main": "src/main/main.js",
   "author": "mlevncomm",

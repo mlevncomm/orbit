@@ -358,7 +358,7 @@ handle('ai:chat', (history) => assistant.chat(history, { emit: send }));
 // ---------- RGB aydınlatma ----------
 handle('rgb:status', () => rgb.status());
 handle('rgb:connect', () => rgb.connect());
-handle('rgb:refresh', async () => { await rgb.refresh(); return rgb.status(); });
+handle('rgb:refresh', () => rgb.rescan('Cihazları yenile'));
 handle('rgb:apply', (profile, deviceId) => rgb.apply(profile, deviceId));
 handle('rgb:live', () => rgb.live());
 handle('rgb:conflicts', () => rgb.conflicts());
