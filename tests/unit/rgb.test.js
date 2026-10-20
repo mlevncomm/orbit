@@ -84,8 +84,62 @@ test('hız: kaydırıcının en üstü cihaz maksimumunun ~%70i (ters aralık da
   assert.equal(sp, 3); // 9 (yavaş) → 0 (hızlı): 9 - 9*0.7 = 2.7 → 3
 });
 
-test('senkron mod: Direct olanlar yazılım, klavye donanımda kalır', async () => {
-  assert.equal((await applyTo(F.RAM, { effect: 'wave' }, 'sync')).applied.method, 'Yazılım');
-  assert.equal((await applyTo(F.KEYBOARD, { effect: 'wave' }, 'sync')).soft, false);
+test('eski "Senkron" ayarı kalmış olsa da RAM yazılımla canlandırılmaz (takılma)', async () => {
+  const r = await applyTo(F.RAM, { effect: 'wave' }, 'sync');
+  assert.equal(r.applied.method, 'Donanım');
+  assert.equal(r.soft, false);
   store.patch('settings', { rgbEngine: 'hardware' });
+});
+
+test('veri yolu: SMBus/I2C cihazı yazılımla canlandırılmaz, USB (HID) anakart canlandırılır', async () => {
+  assert.equal(rgb.slowBus(F.RAM), true);
+  assert.equal(rgb.slowBus(F.BOARD), false); // B550 RGB Fusion 2: USB
+  const ramNoWave = { ...F.RAM, modes: F.RAM.modes.filter((m) => !/wave|shift|visor/i.test(m.name)) };
+  const r = await applyTo(ramNoWave, { effect: 'wave' });
+  assert.equal(r.soft, false, 'RAM: sabit renk geçişi');
+  assert.equal((await applyTo(F.BOARD, { effect: 'wave' })).soft, true, 'anakart: akıcı yazılım dalgası');
+});
+
+test('hafızaya kayıt gecikmeli ve tek sefer: art arda ayarlarda cihaz flaşına her adımda yazılmaz', async () => {
+  const save = F.KEYBOARD.modes.find((m) => (m.flagList || []).includes('manualSave'));
+  const dev = save ? F.KEYBOARD : F.RAM;
+  rgb.client = fakeClient();
+  rgb.raw = new Map([[dev.deviceId, dev]]);
+  const mode = dev.modes.find((m) => (m.flagList || []).includes('manualSave')) || dev.modes[0];
+  const flags = mode.flagList;
+  mode.flagList = [...new Set([...(flags || []), 'manualSave'])];
+  for (let i = 0; i < 5; i++) await rgb.setMode(dev, mode, { effect: 'static', colors: ['#ff0000', '#000000'], speed: 3, brightness: 100 });
+  assert.equal(rgb.client.calls.filter((c) => c.fn === 'saveMode').length, 0, 'hemen kaydetmemeli');
+  rgb.shutdown(); // kapanırken bekleyen kayıt yazılır
+  assert.equal(rgb.client.calls.filter((c) => c.fn === 'saveMode').length, 1);
+  mode.flagList = flags;
+});
+
+test('art arda genel uygulamalarda yalnızca en sonuncusu cihazlara gider', async () => {
+  const seen = [];
+  const orig = rgb.applyNow;
+  rgb.client = fakeClient();
+  rgb.applyNow = async (p) => { seen.push(p.name); await new Promise((r) => setTimeout(r, 20)); return {}; };
+  await Promise.all(['A', 'B', 'C', 'D'].map((name) => rgb.apply({ name, effect: 'static' })));
+  rgb.applyNow = orig;
+  assert.deepEqual(seen, ['D'], 'aradaki istekler atlanmalı, yalnızca son görünüm uygulanmalı');
+});
+
+test('cihaz listesi değişince eski numara eşlemeleri silinir ve görünüm yeniden uygulanır', async () => {
+  rgb.client = { ...fakeClient(), getAllControllerData: async () => [F.RAM, F.KEYBOARD] };
+  rgb.applied.set(99, { method: 'Yazılım' });
+  rgb.soft.set(99, {});
+  let restored = 0;
+  const orig = rgb.restoreNow;
+  rgb.restoreNow = async () => { restored++; };
+  rgb.onDeviceListChanged('test');
+  await new Promise((r) => setTimeout(r, 900));
+  await rgb.queue;
+  rgb.restoreNow = orig;
+  assert.equal(rgb.applied.has(99), false);
+  assert.equal(rgb.soft.has(99), false);
+  assert.equal(rgb.devices.length, 2);
+  assert.equal(restored, 1);
+  rgb.shutdown();
+  rgb.client = null;
 });

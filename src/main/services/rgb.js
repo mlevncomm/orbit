@@ -19,7 +19,9 @@ const TICK = 1000 / 30;
 
 const TYPES = ['Anakart', 'RAM', 'Ekran Kartı', 'Soğutucu', 'LED Şerit', 'Klavye', 'Fare', 'Mousepad', 'Kulaklık', 'Kulaklık Standı',
   'Gamepad', 'Işık', 'Hoparlör', 'Sanal', 'Depolama', 'Kasa', 'Mikrofon', 'Aksesuar', 'Tuş Takımı', 'Laptop', 'Monitör'];
-const SLOW_BUS = new Set([0, 1, 2]); // SMBus/I2C cihazları: anakart, RAM, ekran kartı
+const SLOW_BUS = new Set([0, 1, 2]); // konum bilgisi yoksa: anakart, RAM, ekran kartı genelde SMBus/I2C
+/** Cihaz yavaş SMBus/I2C hattında mı? (OpenRGB konumu: "I2C: ..." / "HID: ...") */
+const slowBus = (d) => (d.location ? /^(i2c|smbus)/i.test(d.location) : SLOW_BUS.has(d.type));
 
 const EFFECTS = {
   static: 'Sabit',
@@ -99,6 +101,10 @@ class RGB extends EventEmitter {
     this.t0 = Date.now();
     this.connecting = null;
     this.reconnectTimer = null;
+    this.queue = Promise.resolve(); // uygulamalar sırayla: aynı anda iki görünüm cihaza karışarak yazılmaz
+    this.pendingApply = null;       // sırada bekleyen en son genel istek (aradakiler atlanır)
+    this.saveTimers = new Map();    // cihaz anahtarı -> hafızaya kaydetme gecikmesi
+    this.watchTimers = [];
   }
 
   findExe() {
@@ -128,6 +134,10 @@ class RGB extends EventEmitter {
   async tryConnect() {
     const c = new Client('Orbit', PORT, '127.0.0.1', { forceProtocolVersion: PROTOCOL });
     await c.connect(1500);
+    // Dinleyicisiz 'error' olayı süreci düşürür (ör. OpenRGB yeniden başlarken EPIPE)
+    c.on('error', (e) => log.warn('OpenRGB bağlantı hatası', e));
+    // OpenRGB cihaz algılamayı bitirince / cihaz takılınca listeyi yeniler
+    c.on('deviceListUpdated', () => { if (this.client === c) this.onDeviceListChanged('OpenRGB bildirdi'); });
     c.on('disconnect', () => {
       if (this.client !== c) return;
       log.warn('OpenRGB bağlantısı koptu');
@@ -167,6 +177,7 @@ class RGB extends EventEmitter {
       }
       await this.refresh();
       log.info(`OpenRGB bağlı, ${this.devices.length} cihaz`);
+      this.watchDetection();
       this.emit('status');
       return this.status();
     })().finally(() => { this.connecting = null; });
@@ -174,6 +185,43 @@ class RGB extends EventEmitter {
   }
 
   key(d) { return `${d.name}|${d.location || d.serial || ''}`; }
+
+  /**
+   * Bilgisayar açılırken OpenRGB cihazları birkaç saniyede bulur (RAM/SMBus en son gelir).
+   * Bağlandıktan sonra bir süre cihaz sayısını izle; değişirse listeyi yenileyip görünümü yeniden uygula.
+   */
+  watchDetection() {
+    this.watchTimers.forEach(clearTimeout);
+    this.watchTimers = [3, 8, 15, 30, 60].map((sec) => setTimeout(async () => {
+      if (!this.client) return;
+      try {
+        const n = await this.client.getControllerCount();
+        if (n !== this.devices.length) this.onDeviceListChanged(`${this.devices.length} → ${n} cihaz`);
+      } catch {}
+    }, sec * 1000));
+  }
+
+  /** Cihaz listesi değişti: numaralar kaymış olabilir → eski eşlemeleri at, yenile, son görünümü uygula */
+  onDeviceListChanged(why) {
+    clearTimeout(this.listTimer);
+    this.listTimer = setTimeout(() => this.enqueue(async () => {
+      if (!this.client) return;
+      this.soft.clear();
+      this.applied.clear();
+      await this.refresh();
+      log.info(`RGB cihaz listesi güncellendi (${why}): ${this.devices.length} cihaz`);
+      await this.restoreNow();
+      this.startLoop();
+      this.emit('status');
+    }).catch((e) => log.warn('RGB cihaz listesi yenilenemedi', e)), 800);
+  }
+
+  /** İşleri sırayla çalıştırır */
+  enqueue(fn) {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch(() => {});
+    return run;
+  }
 
   async refresh() {
     if (!this.client) return [];
@@ -213,7 +261,17 @@ class RGB extends EventEmitter {
   // ---------- Uygulama ----------
 
   /** Profili tüm cihazlara (deviceId null) ya da tek cihaza uygular ve hatırlar. */
-  async apply(profile, deviceId = null, { remember = true } = {}) {
+  apply(profile, deviceId = null, opts = {}) {
+    // Art arda gelen genel isteklerde (hızlı tıklama, kaydırıcı) yalnızca en sonuncusu cihazlara gider
+    const req = { profile };
+    if (deviceId == null) this.pendingApply = req;
+    return this.enqueue(() => {
+      if (deviceId == null && this.pendingApply !== req) return this.status();
+      return this.applyNow(profile, deviceId, opts);
+    });
+  }
+
+  async applyNow(profile, deviceId = null, { remember = true } = {}) {
     if (!this.client) await this.connect();
     if (!this.client) throw new Error('OpenRGB bağlı değil');
     const p = normalize(profile);
@@ -265,7 +323,11 @@ class RGB extends EventEmitter {
   }
 
   /** Cihazın belirli bir donanım modunu seçer (cihaz kartındaki "Mod" listesi). */
-  async applyNative(deviceId, modeName, opts = {}, { remember = true } = {}) {
+  applyNative(deviceId, modeName, opts = {}, o = {}) {
+    return this.enqueue(() => this.applyNativeNow(deviceId, modeName, opts, o));
+  }
+
+  async applyNativeNow(deviceId, modeName, opts = {}, { remember = true } = {}) {
     if (!this.client) await this.connect();
     const d = this.raw.get(deviceId);
     if (!d) throw new Error('Cihaz bulunamadı');
@@ -296,13 +358,11 @@ class RGB extends EventEmitter {
 
   async applyToDevice(d, p) {
     this.soft.delete(d.deviceId);
-    const sync = store.get('settings').rgbEngine === 'sync';
+    // Eski "Senkron" motoru RAM'i yavaş SMBus üzerinden yazılımla canlandırıp takılmaya yol açıyordu;
+    // artık her zaman donanım öncelikli çalışılır.
     const direct = this.directMode(d);
     const animated = ANIMATED.has(p.effect);
     const done = (method, mode, note = '') => this.applied.set(d.deviceId, { method, mode, effect: p.effect, note });
-
-    // Senkron mod: Direct destekleyen cihazlarda tüm animasyonlar aynı saatle yazılımdan
-    if (sync && animated && direct) { await this.startSoft(d, direct, p); return; }
 
     // 1) Donanım modu — yalnızca seçilen renkleri BİREBİR gösterebiliyorsa.
     //    (ör. Logitech "Wave" renk almaz, gökkuşağı gösterir; anakart "Breathing" tek renktir → dalga için uygun değil)
@@ -311,8 +371,9 @@ class RGB extends EventEmitter {
     const fits = mode && (!need || (mode.colorMode === 2 && mode.colorMax >= need));
     if (fits) { await this.setMode(d, mode, p); done('Donanım', mode.name); return; }
 
-    // 2) Akıcı yazılım animasyonu (yalnızca gerçek Direct modu olan cihazlar)
-    if (animated && direct) { await this.startSoft(d, direct, p); return; }
+    // 2) Akıcı yazılım animasyonu: yalnızca gerçek Direct modu olan, hızlı veri yolundaki cihazlar.
+    //    SMBus (RAM vb.) saniyede birkaç yazmayı kaldıramaz → takılır; onlara sabit geçiş uygulanır.
+    if (animated && direct && !slowBus(d)) { await this.startSoft(d, direct, p); return; }
 
     // 3) Sabit: renk / kapalı / animasyonsuz cihazlarda efektin renkleriyle tek seferlik geçiş.
     //    Static > hafızaya kaydeden per-LED mod (RAM "Custom", klavye "Custom") > Direct
@@ -361,7 +422,18 @@ class RGB extends EventEmitter {
       const c = p.effect === 'off' ? BLACK : tint(c1);
       this.client.updateLeds(d.deviceId, new Array(d.colors.length).fill(c));
     }
-    if (flags.includes('manualSave')) await this.client.saveMode(d.deviceId, m);
+    // Cihaz hafızasına yazma yavaştır ve hafızayı yıpratır: kaydırıcı sürüklenirken her adımda değil,
+    // değişiklikler 2 sn durunca bir kez kaydet
+    if (flags.includes('manualSave')) {
+      const k = this.key(d);
+      clearTimeout(this.saveTimers.get(k)?.t);
+      const run = () => {
+        this.saveTimers.delete(k);
+        const cur = [...this.raw.values()].find((x) => this.key(x) === k);
+        if (cur && this.client) Promise.resolve(this.client.saveMode(cur.deviceId, m)).catch((e) => log.warn('RGB kaydedilemedi', e));
+      };
+      this.saveTimers.set(k, { t: setTimeout(run, 2000), run });
+    }
   }
 
   // ---------- Yazılım animasyonu (yalnızca Direct) ----------
@@ -369,7 +441,7 @@ class RGB extends EventEmitter {
   async startSoft(d, direct, p) {
     await this.client.updateMode(d.deviceId, { id: direct.id });
     this.soft.set(d.deviceId, {
-      p, n: d.colors.length, every: SLOW_BUS.has(d.type) ? 3 : 1, // SMBus: 10 fps, USB: 30 fps
+      p, n: d.colors.length, every: slowBus(d) ? 3 : 1, // SMBus: 10 fps, USB: 30 fps
       c1: hexToRgb(p.colors[0]), c2: hexToRgb(p.colors[1]), last: '', tick: 0,
       // hız 1 → 16 sn'lik döngü, 10 → 2 sn
       period: 16 - ((p.speed - 1) / 9) * 14,
@@ -423,17 +495,24 @@ class RGB extends EventEmitter {
 
   /** Açılışta (ve bağlantı yeniden kurulunca) son görünümü geri yükler. */
   async restore() {
-    const st = store.get('rgbState');
-    if (!st || (!st.global && !Object.keys(st.devices || {}).length)) return;
     try {
       await this.connect();
       if (!this.client) return;
-      if (st.global) await this.apply(st.global, null, { remember: false });
+      await this.enqueue(() => this.restoreNow());
+    } catch (e) { log.warn('RGB geri yüklenemedi', e); }
+  }
+
+  /** Kuyruğun İÇİNDEN çağrılır (kendisi kuyruğa girmez, yoksa kilitlenir) */
+  async restoreNow() {
+    const st = store.get('rgbState');
+    if (!this.client || !st || (!st.global && !Object.keys(st.devices || {}).length)) return;
+    try {
+      if (st.global) await this.applyNow(st.global, null, { remember: false });
       for (const [key, v] of Object.entries(st.devices || {})) {
         const d = [...this.raw.values()].find((x) => this.key(x) === key);
         if (!d) continue;
-        if (v.native) await this.applyNative(d.deviceId, v.native.mode, v.native, { remember: false });
-        else if (v.profile) await this.apply(v.profile, d.deviceId, { remember: false });
+        if (v.native) await this.applyNativeNow(d.deviceId, v.native.mode, v.native, { remember: false });
+        else if (v.profile) await this.applyNow(v.profile, d.deviceId, { remember: false });
       }
       log.info('RGB görünümü geri yüklendi');
     } catch (e) { log.warn('RGB geri yüklenemedi', e); }
@@ -453,7 +532,12 @@ class RGB extends EventEmitter {
     });
   }
 
-  shutdown() { this.stopLoop(); clearTimeout(this.reconnectTimer); }
+  shutdown() {
+    this.stopLoop(); clearTimeout(this.reconnectTimer); clearTimeout(this.listTimer); this.watchTimers.forEach(clearTimeout);
+    // Bekleyen hafıza kayıtlarını kapanmadan önce yaz
+    for (const { t, run } of [...this.saveTimers.values()]) { clearTimeout(t); run(); }
+  }
 }
 
 module.exports = new RGB();
+module.exports.slowBus = slowBus;

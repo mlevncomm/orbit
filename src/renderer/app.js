@@ -130,8 +130,8 @@ function hwChips() {
   if (!S.sys) return '';
   const gpu = S.sys.gpus.find((g) => !/basic|microsoft/i.test(g.name)) || S.sys.gpus[0];
   return `<div class="head-chips">
-    <div class="person-chip"><span class="ic" style="background:var(--rose)">${I('gpu')}</span><div><b>${h(gpu?.name || '—')}</b><small>Ekran kartı</small></div></div>
-    <div class="person-chip"><span class="ic" style="background:var(--sky)">${I('cpu')}</span><div><b>${h(S.sys.cpu.name)}</b><small>İşlemci</small></div></div>
+    <div class="person-chip"><span class="ic mesh peach">${I('gpu')}</span><div><b>${h(gpu?.name || '—')}</b><small>Ekran kartı</small></div></div>
+    <div class="person-chip"><span class="ic mesh lilac">${I('cpu')}</span><div><b>${h(S.sys.cpu.name)}</b><small>İşlemci</small></div></div>
   </div>`;
 }
 
@@ -152,19 +152,23 @@ function adminBanner() {
 const CHECK_ICON = { ok: 'check', warn: 'alert', fail: 'x' };
 const REPAIR_LABEL = { 'winget-install': "winget'i kur / onar", 'winget-source-reset': 'Kaynağı sıfırla', 'relaunch-admin': 'Yönetici olarak başlat' };
 
+function pendingBanner() {
+  if (!S.pendingQueue?.length) return '';
+  return `<div class="banner">${I('refresh')}<p><b>Yarım kalan kurulum:</b> önceki oturumdan ${S.pendingQueue.length} öğe (${h(S.pendingQueue.slice(0, 4).map((x) => x.name).join(', '))}${S.pendingQueue.length > 4 ? '…' : ''}) bekliyor.</p>
+      <button class="btn primary sm" data-action="resume-queue">Devam et</button><button class="btn sm" data-action="discard-queue">Vazgeç</button></div>`;
+}
+
+/** Hazırlık kontrolünün ayrıntıları (banner'daki durum etiketine tıklayınca ya da sorun varsa) */
 function readinessCard() {
   const b = S.boot;
-  const pending = S.pendingQueue?.length ? `<div class="banner">${I('refresh')}<p><b>Yarım kalan kurulum:</b> önceki oturumdan ${S.pendingQueue.length} öğe (${h(S.pendingQueue.slice(0, 4).map((x) => x.name).join(', '))}${S.pendingQueue.length > 4 ? '…' : ''}) bekliyor.</p>
-      <button class="btn primary sm" data-action="resume-queue">Devam et</button><button class="btn sm" data-action="discard-queue">Vazgeç</button></div>` : '';
-  if (!b) return pending + `<div class="card ready-card"><div class="row"><span class="spinner"></span><b>Sistem hazırlığı kontrol ediliyor…</b><span class="sub">winget, internet, paket kaynağı, disk</span></div></div>`;
-  const bad = b.checks.filter((c) => c.status !== 'ok');
-  return pending + `<div class="card ready-card ${b.ready ? (bad.length ? 'warn' : 'ok') : 'fail'}">
-    <div class="row"><span class="ready-ic">${I(b.ready ? (bad.length ? 'alert' : 'shield') : 'x', 18)}</span>
-      <div style="flex:1;min-width:200px"><b>${b.ready ? (bad.length ? 'Kuruluma hazır, dikkat edilecekler var' : 'Sistem kuruluma hazır') : 'Kurulum öncesi düzeltilmesi gerekenler var'}</b>
-      <div class="sub">${b.checks.filter((c) => c.status === 'ok').length}/${b.checks.length} kontrol geçti · ${new Date(b.at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div></div>
-      <button class="btn sm" data-action="boot-toggle">${S.bootOpen ? 'Gizle' : 'Ayrıntılar'}</button><button class="btn sm" data-action="boot-check" ${S.bootBusy ? 'disabled' : ''}>${S.bootBusy ? '<span class="spinner"></span>' : I('refresh')}Yeniden kontrol</button></div>
-    ${S.bootOpen || !b.ready ? `<div class="checks">${b.checks.map((c) => `<div class="check-row ${c.status}"><span>${I(CHECK_ICON[c.status], 14)}</span><b>${h(c.title)}</b><small>${h(c.detail)}</small>
-      ${c.fix ? `<button class="btn sm" data-repair="${c.fix}" ${S.bootBusy ? 'disabled' : ''}>${h(REPAIR_LABEL[c.fix] || 'Onar')}</button>` : '<span></span>'}</div>`).join('')}</div>` : ''}
+  if (!b) return '';
+  const ok = b.checks.filter((c) => c.status === 'ok').length;
+  return `<div class="card" style="margin-top:12px">
+    <div class="card-head"><div><h3>Hazırlık kontrolü</h3><p class="sub">${ok}/${b.checks.length} kontrol geçti · ${new Date(b.at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</p></div>
+      <button class="btn sm" data-action="boot-check" ${S.bootBusy ? 'disabled' : ''}>${S.bootBusy ? '<span class="spinner"></span>' : I('refresh')}Yeniden kontrol</button>
+      ${b.ready ? `<button class="icon-btn sm" data-action="boot-toggle" title="Kapat">${I('x')}</button>` : ''}</div>
+    <div class="checks">${b.checks.map((c) => `<div class="check-row ${c.status}"><span>${I(CHECK_ICON[c.status], 14)}</span><b>${h(c.title)}</b><small>${h(c.detail)}</small>
+      ${c.fix ? `<button class="btn sm" data-repair="${c.fix}" ${S.bootBusy ? 'disabled' : ''}>${h(REPAIR_LABEL[c.fix] || 'Onar')}</button>` : '<span></span>'}</div>`).join('')}</div>
   </div>`;
 }
 
@@ -217,13 +221,11 @@ PAGES.dashboard = () => {
   const total = jobs.length;
   const overall = total ? Math.round(jobs.reduce((s, j) => s + (['done', 'skipped', 'error'].includes(j.status) ? 100 : j.percent || 0), 0) / total) : 0;
   const gpu = sys?.gpus.find((g) => !/basic|microsoft/i.test(g.name)) || sys?.gpus?.[0];
-  const tile = (bg, art, title, meta, tag) => `<div class="tile has-art" style="background:${bg}"><span class="tag">${tag}</span><div class="tile-art">${ART[art]()}</div><div class="tile-label"><div class="meta">${h(meta)}</div><b>${h(title)}</b></div></div>`;
-  const orbiters = [
-    { icon: 'chip', color: '#7b5cff' }, { icon: 'package', color: '#ff5f8f' },
-    { icon: 'gpu', color: '#ff8a3d' }, { icon: 'code', color: '#2f80ff' }, { icon: 'light', color: '#f5b300' },
-    { icon: 'usb', color: '#16a37f' }, { icon: 'sparkles', color: '#b04cff' }, { icon: 'download', color: '#6b6b80' }, { icon: 'windows', color: '#0078d4' },
-  ];
-  const ctl = (key, icon, label) => `<button class="ctl ${S.opts[key] ? '' : 'off'}" data-opt="${key}" title="${label}" ${S.running ? 'disabled' : ''}>${I(icon)}<span>${label}</span></button>`;
+  // Referanstaki portre kareleri: mesh zemin, büyük ince çizgi simge, cam isim etiketi
+  const tile = (tone, icon, title, meta, tag) => `<button class="tile mesh ${tone}" data-nav="drivers" title="${h(tag)}: ${h(title)}">
+      <span class="tile-ic glass">${I(icon)}</span><span class="tile-big">${I(icon, 120)}</span>
+      <span class="tile-label glass"><small>${h(tag)}${meta ? ' · ' + h(meta) : ''}</small><b>${h(title)}</b></span></button>`;
+  const ctl = (key, icon, label) => `<button class="ctl ${S.opts[key] ? '' : 'off'}" data-opt="${key}" data-tip="${label}${S.opts[key] ? '' : ' (kapalı)'}" aria-label="${label}" ${S.running ? 'disabled' : ''}>${I(icon)}<span>${label}</span></button>`;
   const waveBars = Array.from({ length: 44 }, (_, i) => `<i style="height:${8 + Math.round(Math.abs(Math.sin(i * 1.7) * 22))}px;animation-delay:${(i % 8) * 0.08}s"></i>`).join('');
 
   const summary = S.running
@@ -231,48 +233,53 @@ PAGES.dashboard = () => {
     : `Merhaba${S.settings.userName ? ' ' + h(S.settings.userName) : ''}! Orbit bu bilgisayarı ${sys ? `<b>${h(sys.cpu.name)}</b>, <b>${h(gpu?.name || '')}</b> ve <b>${h(boardName(sys))}</b>` : 'tarıyor'} olarak algıladı.
        Tek tıkla önce donanımın için onaylı sürücüler (Windows Update + ${autoRecs.length ? autoRecs.map((r) => h(r.name)).join(', ') : 'üretici araçları'}), ardından seçtiğin <b>${apps.length}</b> program sessizce kurulur.`;
 
-  const detail = `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">${apps.slice(0, 12).map((a) => `<div class="row">${appIcon(a, 28)}<span>${h(a.name)}</span>${isInstalled(a) ? '<span class="badge">kurulu</span>' : ''}</div>`).join('') || '<span class="sub">Henüz program seçilmedi.</span>'}${apps.length > 12 ? `<span class="sub">+${apps.length - 12} daha</span>` : ''}</div>`;
+  const detail = `<span class="mini-list">${apps.slice(0, 12).map((a) => `<span class="row">${appIcon(a, 28)}<span>${h(a.name)}</span>${isInstalled(a) ? '<span class="badge">kurulu</span>' : ''}</span>`).join('') || '<span class="sub">Henüz program seçilmedi.</span>'}${apps.length > 12 ? `<span class="sub">+${apps.length - 12} daha</span>` : ''}</span>`;
+  const b = S.boot;
+  const bad = b ? b.checks.filter((c) => c.status !== 'ok') : [];
+  const readyText = !b ? 'Sistem kontrol ediliyor…' : !b.ready ? 'Kurulum öncesi düzeltme gerekli' : bad.length ? `Hazır · ${bad.length} uyarı` : 'Sistem kuruluma hazır';
+  const readyDot = !b ? 'running' : !b.ready ? 'error' : bad.length ? 'warn' : 'done';
 
   return `
-    ${adminBanner()}
+    ${adminBanner()}${pendingBanner()}
     <div class="page-head">
       <div><h1>Sıfırdan Başlayalım</h1><p>Format sonrası tek tıkla sürücüler ve programlar</p></div>
       ${hwChips()}
     </div>
-    ${readinessCard()}
     <div class="dash">
       <div class="tiles">
-        ${tile('var(--lilac)', 'cpu', sys?.cpu.name || 'Algılanıyor…', sys ? `${sys.cpu.cores} çekirdek · ${sys.cpu.threads} iş parçacığı` : '', 'İşlemci')}
-        ${tile('var(--peach)', 'gpu', gpu?.name || 'Algılanıyor…', gpu?.driver ? `Sürücü ${gpu.driver}` : '', 'Ekran Kartı')}
-        ${tile('var(--sky)', 'board', sys ? boardName(sys) : 'Algılanıyor…', sys ? `${sys.ramGB} GB RAM · BIOS ${sys.bios.version}` : '', 'Anakart')}
+        ${tile('lilac', 'cpu', sys?.cpu.name || 'Algılanıyor…', sys ? `${sys.cpu.cores} çekirdek` : '', 'İşlemci')}
+        ${tile('peach', 'gpu', gpu?.name || 'Algılanıyor…', gpu?.driver ? `sürücü ${shortVer(gpu.driver)}` : '', 'Ekran kartı')}
+        ${tile('sky', 'board', sys ? boardName(sys) : 'Algılanıyor…', sys ? `${sys.ramGB} GB RAM` : '', 'Anakart')}
       </div>
-      <div class="hero">
-        <div class="hero-art">${ART.scene(orbiters)}</div>
-        <div style="position:relative;z-index:1">
-          <h2>Bilgisayarını tek tıkla hazırla</h2>
-          <p>Ninite gibi ama sana özel: donanımına uygun güncel sürücüler, geliştirici araçların ve günlük programların, hepsi sessiz kurulum.</p>
+      <div class="hero mesh rose">
+        <div class="hero-top">
+          <button class="hero-status glass" data-action="boot-toggle" title="Hazırlık kontrolünün ayrıntıları"><span class="status-dot ${readyDot}"></span>${readyText}${b ? ` · ${b.checks.length - bad.length}/${b.checks.length}` : ''}</button>
+          <div class="hero-stats">
+            <div class="stat glass"><b>${apps.length}</b><span>seçili program</span></div>
+            <button class="stat glass" data-apps-view="updates"><b>${S.inv ? S.inv.upgrades.length : '…'}</b><span>güncelleme</span></button>
+            <div class="stat glass"><b style="${problems ? 'color:var(--danger)' : ''}">${sys ? problems : '…'}</b><span>sorunlu cihaz</span></div>
+          </div>
         </div>
-        <div class="hero-stats">
-          <div class="stat"><b>${apps.length}</b><span>seçili program</span></div>
-          <button class="stat" data-apps-view="updates"><b>${S.inv ? S.inv.upgrades.length : '…'}</b><span>güncelleme bekliyor</span></button>
-          <div class="stat"><b style="color:${problems ? 'var(--danger)' : 'inherit'}">${sys ? problems : '…'}</b><span>sorunlu cihaz</span></div>
-          <div class="stat"><b>${S.installedLoaded ? S.catalog.apps.filter(isInstalled).length : '…'}</b><span>zaten kurulu</span></div>
+        <div class="hero-copy">
+          <h2>Bilgisayarını tek tıkla hazırla</h2>
+          <p>Donanımına uygun güncel sürücüler, geliştirici araçların ve günlük programların — hepsi sessiz kurulum.</p>
         </div>
         <div class="controls">
-          ${ctl('vendor', 'gpu', 'Üretici')}
-          ${ctl('wu', 'chip', 'Windows Update')}
+          ${ctl('vendor', 'gpu', 'Üretici araçları')}
+          ${ctl('wu', 'chip', 'Windows Update sürücüleri')}
           ${ctl('apps', 'package', 'Programlar')}
-          ${ctl('reboot', 'power', 'Yeniden başlat')}
+          ${ctl('reboot', 'power', 'Bitince yeniden başlat')}
           ${S.running
             ? `<button class="ctl go" data-action="cancel">${I('stop')}<span>Durdur</span></button>`
             : `<button class="ctl go" data-action="one-click">${I('zap')}<span>Hepsini Kur</span></button>`}
         </div>
       </div>
     </div>
+    ${S.bootOpen || (b && !b.ready) ? readinessCard() : ''}
     <div class="card transcript">
       <p>${S.dashTab === 'summary' ? summary : detail}</p>
       <div class="transcript-foot">
-        <div class="seg">
+        <div class="seg dark">
           <button class="${S.dashTab === 'summary' ? 'active' : ''}" data-dash-tab="summary">Özet</button>
           <button class="${S.dashTab === 'detail' ? 'active' : ''}" data-dash-tab="detail">Kurulum listesi</button>
         </div>
@@ -299,8 +306,7 @@ function invSummary() {
 
 PAGES.drivers = () => {
   const sys = S.sys;
-  const ARTS = { cpu: 'cpu', gpu: 'gpu', board: 'board', windows: 'system' };
-  const hw = (bg, icon, label, title, meta) => `<div class="hw has-art" style="background:${bg}"><div class="hw-art">${ART[ARTS[icon]]()}</div><span class="ic">${I(icon)}</span><small>${label}</small><b>${h(title)}</b><small>${h(meta || '')}</small></div>`;
+  const hw = (bg, icon, label, title, meta) => `<div class="hw"><span class="ic">${I(icon, 22)}</span><small>${label}</small><b>${h(title)}</b><small>${h(meta || '')}</small></div>`;
   const gpus = sys?.gpus || [];
   const drv = S.drivers;
   const gpuDrv = drv?.find((d) => d.cls === 'DISPLAY' && !d.generic);
@@ -318,9 +324,9 @@ PAGES.drivers = () => {
   }).join('');
 
   let wu;
-  if (S.scanning) wu = `<div class="empty"><span class="spinner"></span><p>Windows Update sorgulanıyor… (1-3 dakika)</p></div>`;
-  else if (!S.wu) wu = `<div class="empty"><p>Donanım kimliklerine göre Microsoft'un onayladığı sürücüleri bulmak için tarayın.</p><button class="btn primary" data-action="scan-wu">${I('search')}Sürücüleri tara</button></div>`;
-  else if (!S.wu.length) wu = `<div class="empty">${I('check', 28)}<p>Windows Update'te bekleyen sürücü yok. Hepsi güncel.</p><button class="btn sm" data-action="scan-wu">${I('refresh')}Tekrar tara</button></div>`;
+  if (S.scanning) wu = `<div class="empty small"><span class="spinner"></span><p>Windows Update sorgulanıyor… (1-3 dakika)</p></div>`;
+  else if (!S.wu) wu = `<div class="empty small"><p>Henüz taranmadı.</p></div>`;
+  else if (!S.wu.length) wu = `<div class="empty small"><p>${I('check', 16)}</p><p>Bekleyen sürücü yok, hepsi güncel.</p></div>`;
   else {
     const COMPARE = {
       vendor: ['vendor', 'Genel sürücü yerine üretici sürücüsü'], newer: ['newer', 'Daha yeni sürüm'], same: ['same', 'Aynı sürüm'],
@@ -339,7 +345,7 @@ PAGES.drivers = () => {
       ${normal.map(row).join('')}
       ${fw.length ? `<tr><td colspan="5" class="fw-head">${I('alert', 14)} BIOS / UEFI / firmware güncellemeleri otomatik seçilmez; kurulum sırasında elektrik kesilirse kart açılmayabilir.</td></tr>${fw.map(row).join('')}` : ''}
     </tbody></table>
-    <div class="row" style="margin-top:12px"><span class="sub">${S.wuSel.size} / ${S.wu.length} seçili · kurulumdan önce sistem geri yükleme noktası denenir</span><span class="spacer"></span><button class="btn sm" data-action="scan-wu">${I('refresh')}Yeniden tara</button><button class="btn primary sm" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur</button></div>`;
+    <div class="row" style="margin-top:12px"><span class="sub">${S.wuSel.size} / ${S.wu.length} seçili · kurulumdan önce sistem geri yükleme noktası alınır</span><span class="spacer"></span><button class="btn primary sm" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur</button></div>`;
   }
 
   const installedTable = !drv
@@ -352,31 +358,38 @@ PAGES.drivers = () => {
     </tbody></table>`;
   const old = (drv || []).filter((d) => d.ageMonths >= 24).length;
   const problems = sys?.problemDevices || [];
+  const wuCount = S.wu ? S.wu.filter((d) => !d.firmware).length : null;
+  const title = S.scanning ? 'Sürücüler taranıyor…' : problems.length ? `${problems.length} cihazın sürücüsü sorunlu` : wuCount ? `${wuCount} sürücü güncellemesi var` : S.wu ? 'Tüm sürücüler güncel' : 'Sürücü durumu';
+  const lead = S.scanning ? 'Windows Update donanım kimliklerine göre sorgulanıyor (1-3 dakika).'
+    : problems.length ? "Aygıt Yöneticisi'nde sürücüsü eksik ya da hatalı görünen cihazlar var."
+    : wuCount ? 'Microsoft\'un bu bilgisayar için onayladığı sürücüler. Kurmadan önce geri yükleme noktası alınır.'
+    : 'Donanımın Microsoft ve üretici kaynaklarıyla karşılaştırıldı.';
   return `
     ${adminBanner()}
     <div class="page-head"><div><h1>Sürücüler</h1><p>Bu bilgisayardaki sürücülerin durumu ve güncel sürümleri</p></div>
       <button class="btn" data-action="refresh-sys">${I('refresh')}Yeniden algıla</button></div>
-    <div class="hw-grid">
-      ${hw('var(--lilac)', 'cpu', 'İşlemci', sys?.cpu.name || '…', sys ? `${sys.cpu.cores} çekirdek / ${sys.cpu.threads} iş parçacığı` : '')}
-      ${gpus.filter((g) => !/basic|microsoft/i.test(g.name) || gpus.length === 1).map((g) => hw('var(--peach)', 'gpu', 'Ekran kartı', g.name, g.driver ? `Sürücü ${g.driver}${gpuDrv ? ' · ' + ageText(gpuDrv.ageMonths) : ''}` : '')).join('') || hw('var(--peach)', 'gpu', 'Ekran kartı', '…')}
-      ${hw('var(--sky)', 'board', 'Anakart', sys ? boardName(sys) : '…', sys ? `BIOS ${sys.bios.version}` : '')}
-      ${hw('var(--mint)', 'windows', 'Sistem', sys?.os.name || '…', sys ? `Derleme ${sys.os.build} · ${sys.ramGB} GB RAM · C: ${sys.disk.freeGB}/${sys.disk.totalGB} GB boş` : '')}
-    </div>
-    <div class="stat-row">
-      <div class="mini-stat"><b>${drv ? drv.length : '…'}</b><span>donanım sürücüsü</span></div>
-      <div class="mini-stat ${problems.length ? 'bad' : 'good'}"><b>${sys ? problems.length : '…'}</b><span>sorunlu cihaz</span></div>
-      <div class="mini-stat ${S.wu?.length ? 'warn' : S.wu ? 'good' : ''}"><b>${S.wu ? S.wu.length : S.scanning ? '…' : '?'}</b><span>Windows Update sürücüsü</span></div>
-      <div class="mini-stat ${old ? 'warn' : 'good'}"><b>${drv ? old : '…'}</b><span>2 yıldan eski sürücü</span></div>
-    </div>
-    <div class="two">
-      <div class="card"><h3>Üretici araçları</h3><p class="sub" style="margin-bottom:12px">Algılanan donanıma göre: kurulu olanlar işaretli</p><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
-      <div class="card"><h3>Sorunlu cihazlar</h3><p class="sub" style="margin-bottom:12px">Aygıt Yöneticisi'nde sürücüsü eksik veya hatalı görünenler</p>
-        ${problems.length ? `<div class="rec-list">${problems.map((p) => `<div class="rec-item"><span style="color:var(--danger)">${I('alert')}</span><div class="txt"><b>${h(p.name || 'Bilinmeyen aygıt')}</b><p>Hata kodu ${p.code} · ${h(p.id)}</p></div></div>`).join('')}</div>`
-          : `<div class="empty">${I('shield', 28)}<p>${sys ? 'Tüm cihazlar çalışıyor.' : 'Kontrol ediliyor…'}</p></div>`}
+    <section class="page-banner mesh lilac">
+      <div><span class="kicker">Durum</span><h2>${title}</h2><p>${lead}</p>
+        <div class="row">${wuCount ? `<button class="btn primary" data-action="install-wu" ${S.wuSel.size ? '' : 'disabled'}>${I('download')}Seçilenleri kur (${S.wuSel.size})</button>` : ''}
+          <button class="btn" data-action="scan-wu" ${S.scanning ? 'disabled' : ''}>${S.scanning ? '<span class="spinner"></span>' : I('search')}${S.wu ? 'Yeniden tara' : 'Tara'}</button></div></div>
+      <div class="banner-stats">
+        <div class="stat glass"><b>${drv ? drv.length : '…'}</b><span>donanım sürücüsü</span></div>
+        <div class="stat glass"><b style="${problems.length ? 'color:var(--danger)' : ''}">${sys ? problems.length : '…'}</b><span>sorunlu cihaz</span></div>
+        <div class="stat glass"><b>${S.wu ? S.wu.length : S.scanning ? '…' : '—'}</b><span>Windows Update</span></div>
+        <div class="stat glass"><b>${drv ? old : '…'}</b><span>2 yıldan eski</span></div>
       </div>
+    </section>
+    <div class="hw-grid">
+      ${hw('', 'cpu', 'İşlemci', sys?.cpu.name || '…', sys ? `${sys.cpu.cores} çekirdek / ${sys.cpu.threads} iş parçacığı` : '')}
+      ${gpus.filter((g) => !/basic|microsoft/i.test(g.name) || gpus.length === 1).map((g) => hw('', 'gpu', 'Ekran kartı', g.name, g.driver ? `Sürücü ${g.driver}${gpuDrv ? ' · ' + ageText(gpuDrv.ageMonths) : ''}` : '')).join('') || hw('', 'gpu', 'Ekran kartı', '…')}
+      ${hw('', 'board', 'Anakart', sys ? boardName(sys) : '…', sys ? `BIOS ${sys.bios.version}` : '')}
+      ${hw('', 'windows', 'Sistem', sys?.os.name || '…', sys ? `Derleme ${sys.os.build} · ${sys.ramGB} GB RAM · C: ${sys.disk.freeGB}/${sys.disk.totalGB} GB boş` : '')}
     </div>
-    <div class="card" style="margin-top:12px"><h3>Windows Update sürücüleri</h3><p class="sub" style="margin-bottom:8px">Donanım kimliğine göre bu bilgisayar için onaylı, henüz kurulmamış sürücüler (sayfa açılınca otomatik taranır)</p>${wu}</div>
-    <div class="card" style="margin-top:12px"><div class="row"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><span class="spacer"></span><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div>${installedTable}</div>`;
+    ${problems.length ? `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Sorunlu cihazlar</h3><p class="sub">Aygıt Yöneticisi'nde sürücüsü eksik veya hatalı görünenler</p></div></div>
+      <div class="rec-list">${problems.map((p) => `<div class="rec-item"><span style="color:var(--danger)">${I('alert')}</span><div class="txt"><b>${h(p.name || 'Bilinmeyen aygıt')}</b><p>Hata kodu ${p.code} · ${h(p.id)}</p></div></div>`).join('')}</div></div>` : ''}
+    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Windows Update sürücüleri</h3><p class="sub">Donanım kimliğine göre bu bilgisayar için onaylı, henüz kurulmamış sürücüler</p></div></div><div class="table-wrap">${wu}</div></div>
+    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Üretici araçları</h3><p class="sub">Algılanan donanıma göre; kurulu olanlar işaretli</p></div></div><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
+    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div><div class="table-wrap">${installedTable}</div></div>`;
 };
 PAGES.driversAfter = () => {
   if (!S.drivers && !S.driversLoading) loadDrivers();
@@ -402,20 +415,20 @@ PAGES.apps = () => {
   if (view === 'pc') {
     const list = (S.inv?.programs || []).filter((p) => !q || p.name.toLowerCase().includes(q) || (p.publisher || '').toLowerCase().includes(q));
     return head + (!S.inv ? `<div class="card empty"><span class="spinner"></span><p>Kurulu programlar okunuyor…</p></div>` : `
-      <div class="card"><table class="table progs"><thead><tr><th>Program</th><th>Sürüm</th><th>Yayıncı</th><th>Boyut</th><th></th></tr></thead><tbody>
+      <div class="card"><div class="table-wrap"><table class="table progs"><thead><tr><th>Program</th><th>Sürüm</th><th>Yayıncı</th><th>Boyut</th><th></th></tr></thead><tbody>
       ${list.map((p) => {
         const job = p.wingetId && S.jobs.get('upg_' + p.wingetId);
         return `<tr><td><div class="row" style="flex-wrap:nowrap">${appIcon({ name: p.name, color: colorFor(p.name) }, 30)}<div><b>${h(p.name)}</b>${p.wingetId ? `<br><small class="sub mono">${h(p.wingetId)}</small>` : p.store ? '<br><small class="sub">Microsoft Store</small>' : ''}</div></div></td>
         <td><code>${h(shortVer(p.version) || '-')}</code></td><td class="sub">${h(p.publisher || '-')}</td><td class="sub">${p.sizeMB ? (p.sizeMB >= 1024 ? (p.sizeMB / 1024).toFixed(1) + ' GB' : p.sizeMB + ' MB') : '-'}</td>
         <td>${p.available ? `<button class="btn primary sm" data-upgrade="${h(p.wingetId)}" data-upgrade-name="${h(p.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job)) : `v${h(shortVer(p.available))}`}</button>` : p.wingetId ? `<span class="badge">Güncel</span>` : ''}</td></tr>`;
       }).join('')}
-      </tbody></table>${list.length ? '' : '<div class="empty">Sonuç yok.</div>'}</div>`);
+      </tbody></table></div>${list.length ? '' : '<div class="empty">Sonuç yok.</div>'}</div>`);
   }
 
   if (view === 'updates') {
     const ups = (S.inv?.upgrades || []).filter((u) => !q || u.name.toLowerCase().includes(q));
     return head + (!S.inv ? `<div class="card empty"><span class="spinner"></span><p>Güncellemeler denetleniyor…</p></div>`
-      : !ups.length ? `<div class="card empty">${I('shield', 34)}<h3 style="margin-top:10px">Her şey güncel</h3><p>winget ile yönetilen tüm programlar en son sürümde.</p></div>`
+      : !ups.length ? `<div class="card empty small">${I('shield', 26)}<h3>Her şey güncel</h3><p>winget ile yönetilen tüm programlar en son sürümde.</p></div>`
       : `<div class="card"><div class="row" style="margin-bottom:10px"><b>${ups.length} programın yeni sürümü var</b><span class="spacer"></span><button class="btn primary" data-action="upgrade-all" ${S.running ? 'disabled' : ''}>${I('download')}Tümünü güncelle</button></div>
         <div class="rec-list">${ups.map((u) => {
           const job = S.jobs.get('upg_' + u.id);
@@ -482,7 +495,7 @@ PAGES.assistant = () => {
     ${ready ? '' : `<div class="banner">${I('sparkles')}<p>Asistanı kullanmak için Ayarlar'dan Claude API anahtarı ekleyin veya yerel model (Ollama) seçin.</p><button class="btn primary sm" data-nav="settings">Ayarlara git</button></div>`}
     <div class="card chat">
       <div class="chat-list" id="chatList">
-        ${msgs ? '' : `<div class="chat-hero">${ART.orb()}<h2>Bugün ne yapalım?</h2><p class="sub">Donanımını okuyabilir, sürücüleri tarayabilir ve senin onayınla program kurabilirim.</p></div>`}
+        ${msgs ? '' : `<div class="chat-hero"><div class="orb mesh lilac"></div><h2>Bugün ne yapalım?</h2><p class="sub">Donanımını okuyabilir, sürücüleri tarayabilir ve senin onayınla program kurabilirim.</p></div>`}
         ${msgs}
         ${S.thinking ? `<div class="msg"><span class="av">${I('sparkles', 16)}</span><div class="bubble"><span class="spinner"></span></div></div>` : ''}
       </div>
@@ -509,7 +522,7 @@ PAGES.settings = () => {
       <div class="card form">
         <h3>Profil</h3>
         <div class="field"><label>Adın</label><input class="input" data-auto="userName" value="${h(s.userName)}" placeholder="Asistan sana böyle hitap eder"></div>
-        <div class="field"><label>Tema</label><div class="seg"><button class="${s.theme !== 'dark' ? 'active' : ''}" data-theme-set="light">Açık</button><button class="${s.theme === 'dark' ? 'active' : ''}" data-theme-set="dark">Koyu</button></div></div>
+        <div class="field"><label>Tema</label><div class="seg dark" style="justify-self:start"><button class="${s.theme !== 'dark' ? 'active' : ''}" data-theme-set="light">Açık</button><button class="${s.theme === 'dark' ? 'active' : ''}" data-theme-set="dark">Koyu</button></div></div>
         <div class="field"><label>Kurulum profili</label><small>Seçtiğin programlar, özel programların ve RGB profillerin tek dosyada. Format öncesi dışa aktarıp USB'de sakla; format sonrası içe aktar ve "Hepsini Kur".</small>
           <div class="row"><button class="btn" data-action="export">${I('upload')}Dışa aktar</button><button class="btn" data-action="import">${I('download')}İçe aktar</button></div></div>
       </div>
@@ -531,9 +544,6 @@ PAGES.settings = () => {
         <h3>Başlangıç ve arka plan</h3>
         ${sw('startWithWindows', 'Windows açılınca arka planda başlat', 'Son RGB görünümün her açılışta otomatik geri gelir.')}
         ${sw('minimizeToTray', 'Kapatınca sistem tepsisine küçült', 'Işık efektleri ve güncelleme denetimi çalışmaya devam eder.')}
-        <div class="field"><label>RGB motoru</label>
-          <div class="seg"><button class="${s.rgbEngine !== 'sync' ? 'active' : ''}" data-engine="hardware">Donanım (önerilen)</button><button class="${s.rgbEngine === 'sync' ? 'active' : ''}" data-engine="sync">Senkron</button></div>
-          <small>Donanım: her cihaz efekti kendi çipinde çalıştırır; akıcıdır ve Orbit kapalıyken de sürer. Senkron: Direct destekleyen cihazlar tek saatle aynı anda yanar.</small></div>
       </div>
       <div class="card form">
         <h3>Güncellemeler ve hakkında</h3>
@@ -546,7 +556,7 @@ PAGES.settings = () => {
         <div class="row"><button class="btn" data-action="open-logs">${I('terminal')}Günlük klasörü</button><button class="btn" data-open="https://github.com/mlevncomm/orbit/releases">${I('external')}Sürüm notları</button></div>
       </div>
     </div>
-    <div class="card" style="margin-top:12px"><h3>Kurulum geçmişi</h3><div class="sub" style="margin-top:8px">
+    <div class="card" style="margin-top:14px"><h3>Kurulum geçmişi</h3><div class="sub" style="margin-top:8px">
       ${hist.length ? `<table class="table"><tbody>${hist.map((x) => `<tr><td>${h(x.name)}</td><td><span class="status-dot ${x.status}" style="display:inline-block"></span> ${h(statusLabel(x))}</td><td>${new Date(x.at).toLocaleString('tr-TR')}</td></tr>`).join('')}</tbody></table>` : 'Henüz kurulum yapılmadı.'}
     </div></div>`;
 };

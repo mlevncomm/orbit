@@ -17,7 +17,7 @@ const RAM = {
   ],
 };
 const BOARD = {
-  deviceId: 2, type: 0, name: 'B550 AORUS ELITE AX V2', location: 'I2C: PIIX4, address 0x68', colors: leds(5),
+  deviceId: 2, type: 0, name: 'B550 AORUS ELITE AX V2', location: 'HID: \\?\HID#VID_048D&PID_5702&Col02', colors: leds(5),
   modes: [
     m(0, 'Direct', ['brightness', 'perLedColor'], 1, 0, 0, [0, 0], [0, 255]),
     m(1, 'Static', ['brightness', 'modeSpecificColor'], 2, 1, 1, [0, 0], [0, 255]),

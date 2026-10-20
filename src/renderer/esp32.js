@@ -98,8 +98,7 @@ PAGES.esp32 = () => {
       <div class="row"><span class="chip"><span class="status-dot ${connected ? 'done' : st.state === 'disconnected' ? '' : 'running'}"></span>${STATE_TEXT[st.state] || st.state}${st.port ? ' · ' + h(st.port) : ''}</span>
       <button class="btn" data-esp="scan">${I('refresh')}Portları tara</button></div></div>
     <div class="esp-grid">
-      <div class="card form esp-card">
-        <div class="esp-art">${ART.esp32()}</div>
+      <div class="card form">
         <h3>Kart ve port</h3>
         <div class="ports">${portList}</div>
         <div class="row"><label class="sub">Baud</label><select class="input sm" id="espBaud">${BAUDS.map((b) => `<option ${E.baud === b ? 'selected' : ''}>${b}</option>`).join('')}</select>
