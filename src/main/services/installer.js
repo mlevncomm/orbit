@@ -320,10 +320,11 @@ class Installer extends EventEmitter {
       const r = await runProcess(file, amd.silentArgs(item.amdKind), { onSpawn: (c) => (this.child = c) });
       const ex = U.explainExit(r.code);
       log.info(`AMD ${item.amdKind} kurulum çıkışı ${r.code} (${ex.kind})`);
-      if (ex.kind === 'error') return { status: 'error', message: `${ex.text} · ${rp.message}`, error: ex.text };
-      // Sürücü paketleri tamamlanmak için genelde yeniden başlatma ister
+      // AMD yükleyicileri başarılı kurulumda da 0 dışı kod döndürebilir (Chipset: 2 = yeniden başlatma
+      // gerekli; doğrulandı). Sonuca çıkış kodu değil, kurulu sürüm karar verir (verify).
       item.reboot = true;
-      return { status: 'done', message: `${ex.text} · ${rp.message}` };
+      item.exitCode = r.code;
+      return { status: ex.kind === 'error' ? 'error' : 'done', message: `${ex.text} · ${rp.message}`, error: ex.kind === 'error' ? ex.text : null, exitCode: r.code };
     } finally {
       fs.rm(dir, { recursive: true, force: true }, () => {});
     }
@@ -336,13 +337,14 @@ class Installer extends EventEmitter {
     if (item.source === 'wudrivers') return res;
     this.emitItem(item, { phase: 'verify', percent: null, message: 'Doğrulanıyor…' });
     if (item.source === 'amd') {
-      if (res.status === 'error') return res;
+      if (res.status === 'error' && res.exitCode == null) return res; // indirme / imza hatası: kurulum hiç çalışmadı
       const inventory = require('./inventory');
       inventory.invalidate();
       const inv = await inventory.get(true).catch(() => null);
       const prog = inv?.programs.find((x) => amd.verifyName(item.amdKind).test(x.name));
-      const ok = prog && (!item.expectVersion || !prog.version || amd.cmpVer(prog.version, item.expectVersion) >= 0 || item.amdKind === 'gpu');
-      if (ok) return { ...res, status: 'done', verified: true, version: prog.version, message: `Kuruldu · ${prog.name}${prog.version ? ' v' + prog.version : ''} · yeniden başlatma önerilir · ${item.restoreNote || ''}` };
+      const ok = prog && (!item.expectVersion || !prog.version || amd.cmpVer(prog.version, item.expectVersion) >= 0);
+      if (ok) return { ...res, status: 'done', error: null, verified: true, version: prog.version, message: `Kuruldu · ${prog.name}${prog.version ? ' v' + prog.version : ''}${res.exitCode ? ` (yükleyici kodu ${res.exitCode}: yeniden başlatma bekliyor)` : ''} · yeniden başlatma önerilir · ${item.restoreNote || ''}` };
+      if (res.status === 'error') return { ...res, message: `${res.message} · kurulu sürüm: ${prog ? prog.version : 'yok'}` };
       return { ...res, status: 'warn', verified: false, message: `Kurulum komutu bitti ama ${prog ? `sürüm ${prog.version} (beklenen ${item.expectVersion})` : 'program kayıt defterinde bulunamadı'} · yeniden başlattıktan sonra tekrar kontrol et` };
     }
     const inventory = require('./inventory');
