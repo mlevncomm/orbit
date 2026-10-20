@@ -11,6 +11,9 @@ const drivers = require('./services/drivers');
 const installer = require('./services/installer');
 const assistant = require('./ai/assistant');
 const rgb = require('./services/rgb');
+const memory = require('./services/memory');
+const growth = require('./services/growth');
+const siteDl = require('./services/site-downloader');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
 const bootstrap = require('./services/bootstrap');
@@ -39,7 +42,7 @@ async function autoConnectEsp32() {
     autoConnectEsp32.lastError = e.message;
   } finally { esp32AutoBusy = false; }
 }
-const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'assistant', 'settings'];
+const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'wexon', 'assistant', 'settings'];
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -137,7 +140,10 @@ function createWindow() {
 }
 
 const send = (channel, payload) => win && !win.isDestroyed() && win.webContents.send(channel, payload);
-installer.on('progress', (p) => send('install:progress', p));
+installer.on('progress', (p) => {
+  send('install:progress', p);
+  if (p.status === 'done' && p.name) memory.noteInstall(p.name);
+});
 installer.on('state', (s) => {
   send('install:state', s);
   // Kurulum bitince bilgisayardaki durumu yeniden tara (Kurulu / sürüm / güncelleme rozetleri)
@@ -153,7 +159,11 @@ const handle = (ch, fn) => ipcMain.handle(ch, async (_e, ...args) => {
 });
 
 // ---------- Sistem ----------
-handle('system:info', (force) => system.getSystemInfo(force));
+handle('system:info', async (force) => {
+  const r = await system.getSystemInfo(force);
+  try { memory.noteSystem(r); } catch {} // donanımı hafızaya yaz (aynı anahtarla güncellenir)
+  return r;
+});
 handle('system:isAdmin', () => system.isAdmin());
 handle('system:installed', () => system.getInstalledWingetIds());
 handle('inventory:get', async (force) => { const d = await inventory.get(force); return { programs: d.programs, upgrades: d.upgrades, scannedAt: d.scannedAt }; });
@@ -310,6 +320,7 @@ function startAutomation() {
   });
   esp32.on('device-event', (ev) => automation.onDeviceEvent(ev).catch((e) => log.warn('ESP32 olayı', e)));
   esp32.on('connected', () => {
+    setTimeout(() => memory.noteEsp32(esp32.status()), 3000);
     store.patch('settings', { esp32LastPort: esp32.port });
     autoConnectEsp32.lastError = null;
     automation.onConnected().catch(() => {});
@@ -352,6 +363,7 @@ const publicSettings = () => ({ ...store.get('settings'), hasApiKey: !!store.get
 handle('settings:get', publicSettings);
 handle('settings:set', (patch) => setSettings(patch));
 async function setSettings(patch) {
+  try { memory.noteSettings({ ...store.get('settings'), ...(patch || {}) }); } catch {}
   const { apiKey, hasApiKey: _x, ...rest } = patch;
   if (apiKey !== undefined) store.setApiKey(apiKey);
   store.patch('settings', rest);
@@ -376,11 +388,63 @@ handle('history:get', () => store.get('history'));
 // ---------- Asistan ----------
 handle('ai:chat', (history) => assistant.chat(history, { emit: send }));
 
+// ---------- Wexon: Growth OS (arayüz Orbit'te, veri Growth OS sunucusunda) ----------
+handle('growth:status', () => growth.status());
+handle('growth:profiles', () => growth.profiles());
+handle('growth:open', (tenantId, pin) => growth.open(tenantId, pin));
+handle('growth:lock', () => growth.lock());
+handle('growth:overview', () => growth.overview());
+handle('growth:leads', (opts) => growth.leads(opts || {}));
+handle('growth:lead', (id, patch) => growth.updateLead(id, patch || {}));
+handle('growth:campaigns', () => growth.campaigns());
+handle('growth:campaign', (o) => growth.startCampaign(o || {}));
+handle('growth:queue', () => growth.queue());
+handle('growth:draft', (ids) => growth.draft(ids));
+handle('growth:moderate', (ids, action, message) => growth.moderate(ids, action, message));
+
+// ---------- Wexon: Site İndirici ----------
+const SITES_ROOT = () => path.join(app.getPath('documents'), 'Orbit Siteler');
+siteDl.on('status', (st) => send('site:status', st));
+siteDl.on('done', (st) => {
+  const list = [{ url: st.url, host: st.host, dir: st.dir, zip: st.zip, state: st.state, pages: st.pages, assets: st.assets, bytes: st.bytes, errors: st.errors, at: Date.now() }, ...(store.get('siteDownloads') || [])].slice(0, 20);
+  store.set('siteDownloads', list);
+  send('site:history', list);
+});
+handle('site:start', (url, opts) => siteDl.start(url, opts || {}));
+handle('site:cancel', () => siteDl.cancel());
+handle('site:status', () => siteDl.status());
+handle('site:history', () => (store.get('siteDownloads') || []).filter((x) => fs.existsSync(x.dir) || (x.zip && fs.existsSync(x.zip))));
+// Yalnızca "Belgeler\Orbit Siteler" altındaki klasör / zip / index.html açılabilir
+handle('site:open', (target, what) => {
+  const root = SITES_ROOT();
+  const full = path.resolve(String(target || ''));
+  if (!full.startsWith(root + path.sep) || !fs.existsSync(full)) throw new Error('Geçersiz yol');
+  if (what === 'index') { const idx = path.join(full, 'index.html'); return shell.openPath(fs.existsSync(idx) ? idx : full); }
+  if (what === 'show') return shell.showItemInFolder(full);
+  return shell.openPath(full);
+});
+
+// ---------- Hafıza ----------
+handle('memory:state', () => memory.state());
+handle('memory:add', (text, cat) => {
+  const item = memory.remember(text, { cat, source: 'elle', pinned: true });
+  if (!item) throw new Error('Kaydedilmedi: metin çok kısa ya da hassas bilgi (şifre, anahtar, kart numarası) içeriyor.');
+  return memory.state();
+});
+handle('memory:update', (id, patch) => { memory.update(id, patch || {}); return memory.state(); });
+handle('memory:remove', (id) => { memory.remove(id); return memory.state(); });
+handle('memory:clear', (source) => { memory.clear(source || null); return memory.state(); });
+handle('memory:sources', (patch) => { memory.setSources(patch || {}); return memory.state(); });
+handle('memory:learn', async () => memory.learnFromChat(store.get('chat') || [], { apiKey: store.getApiKey() }));
+
 // ---------- RGB aydınlatma ----------
 handle('rgb:status', () => rgb.status());
 handle('rgb:connect', () => rgb.connect());
 handle('rgb:refresh', () => rgb.rescan('Cihazları yenile'));
-handle('rgb:apply', (profile, deviceId) => rgb.apply(profile, deviceId));
+handle('rgb:apply', (profile, deviceId) => {
+  if (deviceId == null && profile?.name && profile.id !== 'draft') memory.notePreset(profile.name);
+  return rgb.apply(profile, deviceId);
+});
 handle('rgb:live', () => rgb.live());
 handle('rgb:conflicts', () => rgb.conflicts());
 handle('rgb:power', (on) => rgb.power(on));
@@ -462,5 +526,5 @@ if (!app.requestSingleInstanceLock()) {
     startAutomation();
   });
 }
-app.on('before-quit', () => { quitting = true; store.flush(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });
+app.on('before-quit', () => { quitting = true; store.flush(); memory.flush(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });
 app.on('window-all-closed', () => app.quit());

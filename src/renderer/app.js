@@ -12,6 +12,7 @@ const NAV = [
   { id: 'apps', label: 'Programlar', icon: 'package' },
   { id: 'lights', label: 'Işıklar', icon: 'light' },
   { id: 'esp32', label: 'ESP32', icon: 'usb' },
+  { id: 'wexon', label: 'Wexon', icon: 'wexon' },
   { id: 'assistant', label: 'Asistan', icon: 'sparkles' },
   { id: 'settings', label: 'Ayarlar', icon: 'settings' },
 ];
@@ -546,9 +547,13 @@ PAGES.assistant = () => {
   }).join('');
   const provider = S.settings.aiProvider === 'ollama' ? `Ollama · ${S.settings.ollamaModel}` : `Claude · ${S.settings.model}`;
   const ready = S.settings.aiProvider === 'ollama' || S.settings.hasApiKey;
+  const tabs = `<div class="seg dark"><button class="${S.asstTab !== 'memory' ? 'active' : ''}" data-asst-tab="chat">${I('sparkles', 15)}Sohbet</button><button class="${S.asstTab === 'memory' ? 'active' : ''}" data-asst-tab="memory">${I('star', 15)}Hafıza</button></div>`;
+  if (S.asstTab === 'memory') {
+    return `<div class="page-head"><div><h1>Asistan</h1><p>Seni tanıyan ve sürekli öğrenen kişisel yapay zekan · ${h(provider)}</p></div><div class="row">${tabs}</div></div>${memoryView()}`;
+  }
   return `
-    <div class="page-head"><div><h1>Asistan</h1><p>Bilgisayarına bağlı kişisel yapay zekan · ${h(provider)}</p></div>
-      <div class="row"><button class="btn" data-action="clear-chat">${I('trash')}Sohbeti temizle</button></div></div>
+    <div class="page-head"><div><h1>Asistan</h1><p>Seni tanıyan ve sürekli öğrenen kişisel yapay zekan · ${h(provider)}</p></div>
+      <div class="row">${tabs}<button class="btn" data-action="clear-chat">${I('trash')}Sohbeti temizle</button></div></div>
     ${ready ? '' : `<div class="banner">${I('sparkles')}<p>Asistanı kullanmak için Ayarlar'dan Claude API anahtarı ekleyin veya yerel model (Ollama) seçin.</p><button class="btn primary sm" data-nav="settings">Ayarlara git</button></div>`}
     <div class="card chat">
       <div class="chat-list" id="chatList">
@@ -563,6 +568,7 @@ PAGES.assistant = () => {
     </div>`;
 };
 PAGES.assistantAfter = () => {
+  if (S.asstTab === 'memory') return memoryAfter();
   const list = $('#chatList'); list.scrollTop = list.scrollHeight;
   $('#chatComposer').addEventListener('submit', (e) => { e.preventDefault(); sendChat($('#chatInput').value); });
   if (!S.thinking) $('#chatInput').focus();
@@ -604,6 +610,7 @@ PAGES.settings = () => {
       </div>
       <div class="card form">
         <h3>Güncellemeler ve hakkında</h3>
+        <p class="sub"><b>Orbit</b>, wexon.dev'in ürünüdür ve yalnızca ${h(S.settings.userName || 'sana')} için özelleştirilir.</p>
         <p class="sub">Orbit <b>v${h(S.version)}</b> · ${h(updateText())}</p>
         <div class="row"><button class="btn" data-action="update-check">${I('refresh')}Güncellemeleri denetle</button>
           ${S.update.state === 'available' ? `<button class="btn primary" data-action="update-download">v${h(S.update.version)} indir</button>` : ''}
@@ -835,7 +842,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
+  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-asst-tab],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
   if (!t) return;
   const d = t.dataset;
 
@@ -866,6 +873,7 @@ document.addEventListener('click', async (e) => {
   if (d.upgrade) return startInstall([{ key: 'upg_' + d.upgrade, name: d.upgradeName || d.upgrade, source: 'winget', wingetId: d.upgrade, color: colorFor(d.upgradeName || d.upgrade) }], `${d.upgradeName || d.upgrade} güncelle`).then(renderPage);
   if (d.themeSet) return setTheme(d.themeSet);
   if (d.open) return safe(() => api.system.open(d.open));
+  if (d.asstTab) { S.asstTab = d.asstTab; saveUi({ asstTab: d.asstTab }); return renderPage(); }
   if (d.installRec) { const r = S.recs.find((x) => x.key === d.installRec); return startInstall([r], `${r.name} kur`); }
   if (d.installAmd) {
     const r = S.recs.find((x) => x.key === d.installAmd);
@@ -1032,6 +1040,7 @@ async function init() {
   const ui = await api.ui.get().catch(() => ({}));
   if (ui.cat) S.cat = ui.cat;
   if (ui.dashTab) S.dashTab = ui.dashTab;
+  if (ui.asstTab) S.asstTab = ui.asstTab;
   if (ui.opts) S.opts = { ...S.opts, ...ui.opts };
   if (ui.page && ui.page !== 'assistant') S.page = ui.page;
   if (ui.appsView) S.appsView = ui.appsView;

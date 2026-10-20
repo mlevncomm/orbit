@@ -3,6 +3,7 @@
 const system = require('../services/system');
 const catalog = require('../services/catalog');
 const drivers = require('../services/drivers');
+const memory = require('../services/memory');
 
 const registry = new Map();
 const register = (tool) => registry.set(tool.name, tool);
@@ -46,6 +47,33 @@ register({
   description: 'Windows Update üzerinden bu bilgisayar için bekleyen sürücü güncellemelerini tarar (1-3 dakika sürebilir).',
   input_schema: { type: 'object', properties: {}, additionalProperties: false },
   run: () => drivers.scanWindowsUpdate(),
+});
+
+register({
+  name: 'remember',
+  description: 'Kullanıcı hakkında kalıcı bir bilgiyi Orbit hafızasına kaydeder (kim olduğu, işi, projeleri, tercihleri, hedefleri). Kullanıcı "bunu hatırla" dediğinde ya da önemli kalıcı bir bilgi paylaştığında kullan. Hassas bilgi (şifre, anahtar, kart) kaydedilmez.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Kısa, tek başına anlaşılır Türkçe cümle' },
+      category: { type: 'string', enum: ['kimlik', 'is', 'tercih', 'bilgisayar', 'aliskanlik', 'not'] },
+    },
+    required: ['text', 'category'],
+    additionalProperties: false,
+  },
+  run: (input, ctx) => {
+    const item = memory.remember(input.text, { cat: input.category, source: 'sohbet' });
+    if (!item) return { saved: false, note: 'Kaydedilmedi (hassas bilgi içeriyor ya da sohbetten öğrenme kapalı).' };
+    ctx.emit('memory:changed', memory.state());
+    return { saved: true, text: item.text };
+  },
+});
+
+register({
+  name: 'search_memory',
+  description: 'Orbit hafızasında kullanıcı hakkında kayıtlı bilgileri arar. Kullanıcı geçmişte ne söylediğini ya da kendisi hakkında ne bildiğini sorarsa kullan.',
+  input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false },
+  run: (input) => memory.relevant(input.query, 15).map((x) => ({ text: x.text, category: x.cat, source: x.source, updated: new Date(x.updatedAt).toLocaleDateString('tr-TR') })),
 });
 
 function list() { return [...registry.values()]; }

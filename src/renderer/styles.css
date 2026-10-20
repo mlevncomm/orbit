@@ -672,3 +672,46 @@ button.stat { cursor: pointer; }
 /* çok koyu markalar (GitHub, Vercel, Epic…) koyu temada görünür kalsın */
 :root[data-theme="dark"] .app-ic.brand:not(.light) { color: color-mix(in srgb, var(--brand) 55%, #ffffff); }
 .job-head .app-ic.brand, .table.progs .app-ic.brand { padding: 7px; }
+
+/* Hafıza */
+.mem-list { padding: 8px; display: grid; gap: 2px; margin-top: 4px; }
+.mem-row { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: 16px; }
+.mem-row:hover { background: var(--surface-2); }
+.mem-row.pinned .mem-src { background: var(--black); color: var(--on-black); }
+.mem-row.editing { background: var(--surface-2); flex-wrap: wrap; }
+.mem-row.editing .input:not(.sm) { flex: 1; min-width: 220px; }
+.mem-src { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex-shrink: 0; background: var(--surface-2); color: var(--ink-2); }
+.mem-txt { flex: 1; min-width: 0; }
+.mem-txt p { font-size: 14.5px; color: var(--ink); }
+.mem-txt small { color: var(--muted); font-size: 12px; }
+.mem-row .icon-btn.sm { opacity: 0; transition: opacity .15s; }
+.mem-row:hover .icon-btn.sm, .mem-row .icon-btn.sm.on { opacity: 1; }
+.mem-row .icon-btn.sm.on { background: var(--black); color: var(--on-black); }
+.mem-toggle { cursor: pointer; display: grid; gap: 2px; position: relative; }
+.mem-toggle .switch { position: absolute; top: 10px; right: 10px; }
+.mem-toggle .switch input { width: 34px; height: 20px; }
+.mem-toggle .switch input::after { width: 14px; height: 14px; }
+.mem-toggle .switch input:checked::after { transform: translateX(14px); }
+.brand-name { display: grid; line-height: 1.05; }
+.brand-name small { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: .02em; }
+
+/* Wexon */
+.wx-tabs { margin: -8px 0 16px; }
+.wx-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.wx-profile { display: grid; justify-items: start; gap: 6px; padding: 22px; border-radius: var(--r-lg); text-align: left; background: var(--surface); box-shadow: var(--shadow); border: 1px solid var(--edge); outline: 2px solid transparent; outline-offset: -2px; transition: transform .12s, outline-color .15s; }
+.wx-profile:hover { transform: translateY(-2px); }
+.wx-profile.on { outline-color: var(--pa); }
+.wx-profile b { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.wx-profile small { color: var(--muted); font-size: 13.5px; }
+.wx-letter { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; font-size: 24px; font-weight: 700; color: var(--pa); background: var(--pc); box-shadow: 0 12px 24px -12px var(--pc); margin-bottom: 6px; }
+.wx-pin { margin-top: 14px; max-width: 420px; }
+.wx-pin .input { margin-top: 12px; font-size: 26px; letter-spacing: .5em; text-align: center; height: 60px; }
+.wx-av { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: var(--surface); color: var(--ink-2); font-weight: 600; }
+.wx-leads .input.sm { max-width: 170px; }
+.wx-note { min-width: 160px; }
+.wx-msg { font-family: var(--font); font-size: 14.5px; line-height: 1.55; min-height: 110px; }
+.wx-job .card-head { align-items: center; }
+.wx-site-opts { margin-top: 12px; gap: 18px; }
+.wx-site-opts .field { display: flex; align-items: center; gap: 8px; }
+.wx-site-opts .input.sm { width: 80px; }
+.page-banner .status-dot { vertical-align: middle; }
