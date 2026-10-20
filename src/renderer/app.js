@@ -61,16 +61,19 @@ function hydrateIcons(root = document) {
   });
 }
 /** Rengin açık olup olmadığı (logo zemini için) */
-const isLight = (hex) => { const n = parseInt(String(hex).replace('#', ''), 16); return ((n >> 16) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) > 200; };
+const isLight = (hex) => { const n = parseInt(String(hex).replace('#', ''), 16); return ((n >> 16) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) > 170; };
 /**
- * Program simgesi: kuruluysa Windows'taki gerçek simgesi, değilse markanın logosu (Simple Icons),
- * o da yoksa marka renginde baş harfler.
+ * Program simgesi: kuruluysa Windows'taki gerçek simgesi, değilse resmi sitesindeki simgesi ya da
+ * markanın logosu (Simple Icons), o da yoksa marka renginde baş harfler.
  */
 const appIcon = (a, size) => {
   const dim = size ? `;width:${size}px;height:${size}px` : '';
   const file = a.status?.icon || a.icon;
   const real = file && S.fileIcons?.[file];
   if (real) return `<span class="app-ic real" style="${dim.slice(1)}"><img src="${real}" alt=""></span>`;
+  // Programın resmi sitesindeki / deposundaki kendi simgesi (gömülü, scripts/gen-site-icons.js)
+  const site = window.SITE_ICONS?.[a.key];
+  if (site) return `<span class="app-ic real" style="${dim.slice(1)}"><img src="${site}" alt=""></span>`;
   const b = window.BRAND_ICONS?.[a.key];
   if (b) {
     const hex = '#' + b.h;
