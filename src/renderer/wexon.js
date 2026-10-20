@@ -2,7 +2,7 @@
 const W = {
   status: null, profiles: null, pick: null, pin: '', tab: 'ozet', busy: false, err: '',
   overview: null, leads: null, q: '', st: '', sel: new Set(), queue: null, campaigns: null, edits: {},
-  site: { status: null, history: [], url: '', maxPages: 60, maxDepth: 3, robots: true, zip: true },
+  site: { status: null, history: [], url: '', maxPages: 30, maxDepth: 3, robots: true, zip: true, render: true, scripts: 'strip', authorized: false },
   timer: null,
 };
 const LEAD_STATUSES = [['yeni', 'Yeni'], ['yazildi', 'Yazıldı'], ['donus_var', 'Dönüş var'], ['geri_ara', 'Geri aranacak'], ['ulasilamadi', 'Açmadı'], ['ilgilenmiyor', 'İlgilenmiyor']];
@@ -15,6 +15,13 @@ async function wx(fn, after) {
   try { const r = await fn(); if (after) after(r); } catch (e) { W.err = e.message; if (/Giriş gerekli|401/.test(e.message)) { W.status = await api.growth.status(); } toast(e.message, true); }
   W.busy = false;
   if (S.page === 'wexon') renderPage();
+}
+
+/** Wexon alt görünümünü seç (sol menüden) */
+function wxTab(tab) {
+  if (W.tab === tab) return;
+  W.tab = tab; W.err = ''; saveUi({ wexonTab: tab });
+  if (W.loaded) W.loaded[tab] = false;
 }
 
 async function wxLoad(tab = W.tab) {
@@ -33,9 +40,9 @@ async function wxLoad(tab = W.tab) {
 PAGES.wexon = () => {
   const tabs = [['ozet', 'grid', 'Özet'], ['musteriler', 'users', 'Müşteriler'], ['bul', 'mappin', 'Müşteri Bul'], ['whatsapp', 'message', 'WhatsApp'], ['site', 'globe', 'Site İndirici']];
   const connected = W.status?.connected;
-  const head = `<div class="page-head"><div><h1>Wexon</h1><p>wexon.dev iş merkezi · Growth OS ve web stüdyosu araçları</p></div>
-    <div class="row">${connected ? `<span class="chip"><span class="status-dot done"></span>${h(W.status.profile || 'Profil açık')}</span><button class="btn" data-wx="lock">${I('lock')}Kilitle</button>` : ''}</div></div>
-    <div class="seg dark wx-tabs">${tabs.map(([k, ic, n]) => `<button class="${W.tab === k ? 'active' : ''}" data-wx-tab="${k}">${I(ic, 15)}${n}</button>`).join('')}</div>`;
+  const title = { ozet: ['Growth OS', 'wexon.dev müşteri ve satış merkezi'], musteriler: ['Müşteriler', 'Growth OS müşteri listesi'], bul: ['Müşteri Bul', 'Google Places ile yeni işletme keşfi'], whatsapp: ['WhatsApp', 'Onay bekleyen satış mesajları'], site: ['Site Klonlayıcı', 'wexon.dev web stüdyosu · bir siteyi birebir kopyala'] }[W.tab] || ['Wexon', ''];
+  const head = `<div class="page-head"><div><h1>${title[0]}</h1><p>${title[1]}</p></div>
+    <div class="row">${connected && W.tab !== 'site' ? `<span class="chip"><span class="status-dot done"></span>${h(W.status.profile || 'Profil açık')}</span><button class="btn" data-wx="lock">${I('lock')}Kilitle</button>` : ''}</div></div>`;
 
   if (W.tab === 'site') return head + siteView();
   if (!W.status) { api.growth.status().then((s) => { W.status = s; renderPage(); }); return head + `<div class="card empty"><span class="spinner"></span></div>`; }
@@ -72,7 +79,9 @@ PAGES.wexonAfter = () => {
     const fd = new FormData(sf);
     W.site.url = fd.get('url'); W.site.maxPages = +fd.get('maxPages'); W.site.maxDepth = +fd.get('maxDepth');
     W.site.robots = !!fd.get('robots'); W.site.zip = !!fd.get('zip');
-    try { W.site.status = await api.site.start(W.site.url, { maxPages: W.site.maxPages, maxDepth: W.site.maxDepth, robots: W.site.robots, zip: W.site.zip }); } catch (err) { toast(err.message, true); }
+    W.site.render = fd.get('mode') !== 'fast'; W.site.scripts = fd.get('scripts') ? 'keep' : 'strip'; W.site.authorized = !!fd.get('authorized');
+    if (!W.site.authorized) { toast('Önce sitenin sana ait olduğunu ya da izin aldığını onayla', true); return renderPage(); }
+    try { W.site.status = await api.site.start(W.site.url, { maxPages: W.site.maxPages, maxDepth: W.site.maxDepth, robots: W.site.robots, zip: W.site.zip, render: W.site.render, scripts: W.site.scripts, authorized: true }); } catch (err) { toast(err.message, true); }
     renderPage();
   });
   document.querySelectorAll('[data-wx-edit]').forEach((el) => el.addEventListener('input', () => (W.edits[el.dataset.wxEdit] = el.value)));
@@ -190,44 +199,57 @@ function queueView() {
       </div>`).join('') || '<div class="card empty small"><p>Müşteriler sekmesinden müşteri seçip "WhatsApp taslağı" ile taslak hazırlayabilirsin.</p></div>'}</div>`;
 }
 
+const PHASE = { pages: 'Sayfalar tarayıcıda çiziliyor', assets: 'Dosyalar indiriliyor', write: 'Bağlantılar yerel dosyalara çevriliyor', verify: 'Klon orijinalle karşılaştırılıyor', done: '' };
+const simClass = (v) => (v >= 97 ? 'ok' : v >= 85 ? 'warn' : 'old');
+
 function siteView() {
   const st = W.site.status;
+  const o = W.site;
   const running = st?.state === 'running';
   const pct = st ? Math.min(100, Math.round((st.pages / Math.max(1, Math.min(st.pageLimit, st.pages + st.queued))) * 100)) : 0;
-  const hist = (W.site.history || []).map((x) => `<div class="rec-item"><span class="wx-av">${I('globe', 16)}</span>
-    <div class="txt"><b>${h(x.host)}</b><p>${x.pages} sayfa · ${x.assets} dosya · ${fmtMB(x.bytes)}${x.errors ? ` · ${x.errors} hata` : ''} · ${new Date(x.at).toLocaleString('tr-TR')}${x.state === 'cancelled' ? ' · yarıda kesildi' : ''}</p></div>
+  const sim = st?.similarity;
+  const hist = (o.history || []).map((x) => `<div class="rec-item"><span class="wx-av">${I('globe', 16)}</span>
+    <div class="txt"><b>${h(x.host)}</b><p>${x.pages} sayfa · ${x.assets} dosya · ${fmtMB(x.bytes)}${x.similarity != null ? ` · benzerlik %${x.similarity}` : ''}${x.errors ? ` · ${x.errors} hata` : ''} · ${new Date(x.at).toLocaleString('tr-TR')}${x.state === 'cancelled' ? ' · yarıda kesildi' : ''}</p></div>
     <button class="btn sm" data-site-open="${h(x.dir)}" data-what="index">${I('external', 14)}Aç</button>
     <button class="btn sm" data-site-open="${h(x.dir)}" data-what="show">${I('folder', 14)}Klasör</button>
     ${x.zip ? `<button class="btn sm" data-site-open="${h(x.zip)}" data-what="show">Zip</button>` : ''}</div>`).join('');
+  const phaseText = running ? (PHASE[st.phase] || '') + (st.current ? ' · ' + st.current : '') : st?.state === 'done' ? 'Tamamlandı' : st?.state === 'cancelled' ? 'Durduruldu' : 'Hata';
+  const bar = running ? (st.phase === 'pages' ? pct : st.phase === 'verify' ? 95 : 80) : 100;
   return `
     <section class="page-banner mesh rose">
-      <div><span class="kicker">wexon.dev · Site İndirici</span><h2>Bir siteyi tüm dosyalarıyla indir</h2>
-        <p>Sayfalar, CSS, JS, görseller ve yazı tipleri indirilir; bağlantılar yerel dosyalara çevrilir, çevrimdışı açılır. Yalnızca sahibi olduğun ya da izin aldığın siteler için kullan.</p></div>
+      <div><span class="kicker">wexon.dev · web stüdyosu</span><h2>Bir siteyi birebir klonla</h2>
+        <p>Her sayfa gerçek bir tarayıcıda çizilir; JavaScript ile oluşan içerik, yazı tipleri ve sonradan yüklenen görseller dahil kopyalanır, internetsiz açılır. Sonunda klon orijinalle ekran ekran karşılaştırılır.</p></div>
+      ${sim ? `<div class="banner-stats"><div class="stat glass"><b>%${sim.avg}</b><span>ortalama benzerlik</span></div><div class="stat glass"><b>${sim.pages.length}</b><span>sayfa karşılaştırıldı</span></div><div class="stat glass"><b>${sim.blocked}</b><span>internet isteği (çevrimdışı)</span></div><div class="stat glass"><b>${st.assets}</b><span>dosya</span></div></div>` : ''}
     </section>
     <form class="card form" id="wxSite">
-      <div class="row" style="flex-wrap:nowrap"><label class="search" style="box-shadow:none;background:var(--surface-2)">${I('globe')}<input name="url" placeholder="https://ornek.com" value="${h(W.site.url)}" required ${running ? 'disabled' : ''}></label>
-        ${running ? `<button class="btn danger" type="button" data-wx="site-cancel">${I('stop')}Durdur</button>` : `<button class="btn primary" type="submit">${I('download')}İndir</button>`}</div>
+      <div class="row" style="flex-wrap:nowrap"><label class="search" style="box-shadow:none;background:var(--surface-2)">${I('globe')}<input name="url" placeholder="https://ornek.com" value="${h(o.url)}" required ${running ? 'disabled' : ''}></label>
+        ${running ? `<button class="btn danger" type="button" data-wx="site-cancel">${I('stop')}Durdur</button>` : `<button class="btn primary" type="submit">${I('download')}Klonla</button>`}</div>
       <div class="row wx-site-opts">
-        <label class="field"><span class="sub">En çok sayfa</span><input class="input sm" name="maxPages" type="number" min="1" max="500" value="${W.site.maxPages}"></label>
-        <label class="field"><span class="sub">Derinlik</span><input class="input sm" name="maxDepth" type="number" min="0" max="6" value="${W.site.maxDepth}"></label>
-        <label class="switch compact"><input type="checkbox" name="robots" ${W.site.robots ? 'checked' : ''}><span>robots.txt'ye uy</span></label>
-        <label class="switch compact"><input type="checkbox" name="zip" ${W.site.zip ? 'checked' : ''}><span>Zip de oluştur</span></label>
+        <div class="seg"><label class="${o.render ? 'active' : ''}"><input type="radio" name="mode" value="render" ${o.render ? 'checked' : ''} hidden>Birebir (tarayıcıda çiz)</label><label class="${o.render ? '' : 'active'}"><input type="radio" name="mode" value="fast" ${o.render ? '' : 'checked'} hidden>Hızlı (yalnızca HTML)</label></div>
+        <label class="field"><span class="sub">En çok sayfa</span><input class="input sm" name="maxPages" type="number" min="1" max="500" value="${o.maxPages}"></label>
+        <label class="field"><span class="sub">Derinlik</span><input class="input sm" name="maxDepth" type="number" min="0" max="6" value="${o.maxDepth}"></label>
+        <label class="switch compact"><input type="checkbox" name="scripts" ${o.scripts === 'keep' ? 'checked' : ''}><span>Betikleri koru<small>Kapalı: statik, birebir görünüm (önerilen)</small></span></label>
+        <label class="switch compact"><input type="checkbox" name="robots" ${o.robots ? 'checked' : ''}><span>robots.txt'ye uy</span></label>
+        <label class="switch compact"><input type="checkbox" name="zip" ${o.zip ? 'checked' : ''}><span>Zip oluştur</span></label>
       </div>
+      <label class="switch wx-auth"><input type="checkbox" name="authorized" ${o.authorized ? 'checked' : ''}><span>Bu site bana (ya da müşterime) ait veya sahibinden kopyalama izni aldım<small>Başkasının sitesini izinsiz kopyalamak telif hakkı ihlali olabilir; klonu başkasının adıyla yayınlamak dolandırıcılık sayılır.</small></span></label>
     </form>
-    ${st ? `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>${h(st.host)}</h3><p class="sub">${running ? h(st.current || '') : st.state === 'done' ? 'Tamamlandı' : st.state === 'cancelled' ? 'Durduruldu' : 'Hata'}</p></div>
-        ${!running && st.dir ? `<button class="btn primary sm" data-site-open="${h(st.dir)}" data-what="index">${I('external', 14)}Siteyi aç</button><button class="btn sm" data-site-open="${h(st.dir)}" data-what="show">${I('folder', 14)}Klasör</button>` : ''}</div>
-      <div class="upbar" style="margin-bottom:10px"><i style="width:${running ? pct : 100}%"></i></div>
+    ${st ? `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>${h(st.host)}</h3><p class="sub">${h(phaseText)}</p></div>
+        ${!running && st.dir ? `<button class="btn primary sm" data-site-open="${h(st.dir)}" data-what="index">${I('external', 14)}Klonu aç</button><button class="btn sm" data-site-open="${h(st.dir)}" data-what="show">${I('folder', 14)}Klasör</button>` : ''}</div>
+      <div class="upbar" style="margin-bottom:10px"><i style="width:${bar}%"></i></div>
       <div class="row">${[[`${st.pages}/${st.pageLimit}`, 'sayfa'], [st.assets, 'dosya'], [fmtMB(st.bytes), 'indirildi'], [st.errors, 'hata'], [st.skippedRobots, 'robots ile atlandı']].map(([n, l]) => `<span class="chip"><b>${n}</b> ${l}</span>`).join('')}</div>
-      ${st.errorList?.length && !running ? `<details style="margin-top:10px"><summary class="sub">Hatalar</summary><div class="mono" style="margin-top:6px">${st.errorList.map((e) => `${h(e.url)} — ${h(e.error)}`).join('<br>')}</div></details>` : ''}</div>` : ''}
-    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>İndirilenler</h3><p class="sub">Belgeler › Orbit Siteler</p></div></div>
-      <div class="rec-list">${hist || '<div class="empty small">Henüz site indirilmedi.</div>'}</div></div>`;
+      ${sim?.pages?.length ? `<div class="section-title" style="margin-top:18px">Orijinal ile klon karşılaştırması</div><div class="rec-list">${sim.pages.map((p) => `<div class="rec-item"><span class="age ${simClass(p.score)}">%${p.score}</span><div class="txt"><b>${h(p.page)}</b></div>
+          <button class="btn sm" data-site-open="${h(p.original)}" data-what="file">Orijinal</button><button class="btn sm" data-site-open="${h(p.clone)}" data-what="file">Klon</button></div>`).join('')}</div>` : ''}
+      ${st.errorList?.length && !running ? `<details style="margin-top:10px"><summary class="sub">Hatalar (${st.errors})</summary><div class="mono" style="margin-top:6px">${st.errorList.map((e) => `${h(e.url)} — ${h(e.error)}`).join('<br>')}</div></details>` : ''}</div>` : ''}
+    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Klonlar</h3><p class="sub">Belgeler › Orbit Siteler</p></div></div>
+      <div class="rec-list">${hist || '<div class="empty small">Henüz site klonlanmadı.</div>'}</div></div>`;
 }
 
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-wx],[data-wx-tab],[data-wx-pick],[data-wx-status],[data-wx-job],[data-wx-sel],[data-wx-all],[data-site-open]');
   if (!t || t.disabled) return;
   const d = t.dataset;
-  if (d.wxTab) { W.tab = d.wxTab; saveUi({ wexonTab: d.wxTab }); W.err = ''; renderPage(); return wxLoad(); }
+  if (d.wxTab) { const sec = SECTIONS.find((s) => s.id === 'wexon'); const it = sec.items.find((i) => i.on && (wxTab(d.wxTab), i.on())); return it ? goSub(it) : (renderPage(), wxLoad()); }
   if (d.wxPick) { W.pick = W.pick === d.wxPick ? null : d.wxPick; W.err = ''; return renderPage(); }
   if (d.wxStatus) { W.tab = 'musteriler'; W.st = d.wxStatus; W.leads = null; renderPage(); return wxLoad('musteriler'); }
   if (d.wxSel) { W.sel.has(d.wxSel) ? W.sel.delete(d.wxSel) : W.sel.add(d.wxSel); return renderPage(); }
@@ -259,6 +281,8 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
+  if (t.matches('#wxSite input[name=mode]')) { W.site.render = t.value !== 'fast'; return renderPage(); }
+  if (t.matches('#wxSite input[name=authorized]')) { W.site.authorized = t.checked; return; }
   if (t.matches('[data-wx-filter]')) { W.st = t.value; W.leads = null; renderPage(); return wxLoad('musteriler'); }
   if (t.matches('[data-wx-lead-status]')) return wx(() => api.growth.lead(t.dataset.wxLeadStatus, { status: t.value }), () => toast('Durum güncellendi'));
   if (t.matches('[data-wx-note]')) return wx(() => api.growth.lead(t.dataset.wxNote, { notes: t.value }), () => toast('Not kaydedildi'));

@@ -406,7 +406,7 @@ handle('growth:moderate', (ids, action, message) => growth.moderate(ids, action,
 const SITES_ROOT = () => path.join(app.getPath('documents'), 'Orbit Siteler');
 siteDl.on('status', (st) => send('site:status', st));
 siteDl.on('done', (st) => {
-  const list = [{ url: st.url, host: st.host, dir: st.dir, zip: st.zip, state: st.state, pages: st.pages, assets: st.assets, bytes: st.bytes, errors: st.errors, at: Date.now() }, ...(store.get('siteDownloads') || [])].slice(0, 20);
+  const list = [{ url: st.url, host: st.host, dir: st.dir, zip: st.zip, state: st.state, pages: st.pages, assets: st.assets, bytes: st.bytes, errors: st.errors, similarity: st.similarity?.avg ?? null, at: Date.now() }, ...(store.get('siteDownloads') || [])].slice(0, 20);
   store.set('siteDownloads', list);
   send('site:history', list);
 });
@@ -421,6 +421,7 @@ handle('site:open', (target, what) => {
   if (!full.startsWith(root + path.sep) || !fs.existsSync(full)) throw new Error('Geçersiz yol');
   if (what === 'index') { const idx = path.join(full, 'index.html'); return shell.openPath(fs.existsSync(idx) ? idx : full); }
   if (what === 'show') return shell.showItemInFolder(full);
+  if (what === 'file' && !/\.png$/i.test(full)) throw new Error('Geçersiz dosya');
   return shell.openPath(full);
 });
 

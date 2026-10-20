@@ -49,3 +49,22 @@ test('www. olan ve olmayan adres aynı site', () => {
   assert.equal(H.sameSite('cdn.wexon.dev', 'wexon.dev'), false);
   assert.equal(H.localPath(new URL('https://www.site.com/a.png'), 'site.com', false), 'a.png');
 });
+
+test('statik klon: betikler ve noscript kaldırılır, JSON-LD ve stiller kalır; uzantısız dosyaya türüne göre uzantı', () => {
+  const html = `<head><script src="/_next/a.js"></script><script>window.x=1</script><script type="application/ld+json">{"@type":"Org"}</script>
+    <link rel="modulepreload" href="/m.js"><link rel="preload" as="script" href="/p.js"><link rel="stylesheet" href="/s.css"></head>
+    <body><noscript><img src="/px.gif"></noscript><div>içerik</div></body>`;
+  const out = H.stripScripts(html);
+  assert.ok(!/_next\/a\.js|window\.x|modulepreload|as="script"|noscript/.test(out));
+  assert.match(out, /application\/ld\+json/);
+  assert.match(out, /stylesheet/);
+  assert.match(out, /içerik/);
+  assert.equal(H.extFor('_next/image/index_ab12cd34', 'image/webp'), '_next/image/index_ab12cd34.webp');
+  assert.equal(H.extFor('img/logo.png', 'image/png'), 'img/logo.png');
+  assert.equal(H.extFor('font/x', 'font/woff2; charset=binary'), 'font/x.woff2');
+});
+
+test('klonlama izin onayı olmadan başlamaz', async () => {
+  const dl = require('../../src/main/services/site-downloader');
+  await assert.rejects(() => dl.start('https://ornek.com', {}), /izin/);
+});

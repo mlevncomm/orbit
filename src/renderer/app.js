@@ -6,16 +6,62 @@ const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<'
 const initials = (n) => n.replace(/[^\p{L}\p{N} +]/gu, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const time = () => new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 
-const NAV = [
-  { id: 'dashboard', label: 'Panel', icon: 'grid' },
-  { id: 'drivers', label: 'Sürücüler', icon: 'chip' },
-  { id: 'apps', label: 'Programlar', icon: 'package' },
-  { id: 'lights', label: 'Işıklar', icon: 'light' },
-  { id: 'esp32', label: 'ESP32', icon: 'usb' },
-  { id: 'wexon', label: 'Wexon', icon: 'wexon' },
-  { id: 'assistant', label: 'Asistan', icon: 'sparkles' },
-  { id: 'settings', label: 'Ayarlar', icon: 'settings' },
+/*
+ * Menü: üstte ana bölümler, solda seçili bölümün alt menüleri.
+ * Alt menü öğesi: { label, icon, page, set?() (sayfanın alt görünümünü seçer), on?() (etkin mi), anchor? (sayfada kaydırılacak bölüm), group? }
+ */
+const SECTIONS = [
+  { id: 'panel', label: 'Panel', icon: 'grid', items: [
+    { label: 'Genel bakış', icon: 'grid', page: 'dashboard', set: () => (S.bootOpen = false), on: () => !S.bootOpen },
+    { label: 'Hazırlık kontrolü', icon: 'shield', page: 'dashboard', set: () => (S.bootOpen = true), on: () => S.bootOpen, anchor: 'ready' },
+  ] },
+  { id: 'kurulum', label: 'Kurulum', icon: 'package', items: [
+    { group: 'Programlar', label: 'Katalog', icon: 'package', page: 'apps', set: () => (S.appsView = 'catalog'), on: () => (S.appsView || 'catalog') === 'catalog' },
+    { label: 'Bu bilgisayar', icon: 'windows', page: 'apps', set: () => (S.appsView = 'pc'), on: () => S.appsView === 'pc', badge: () => S.inv?.programs.length },
+    { label: 'Güncellemeler', icon: 'download', page: 'apps', set: () => (S.appsView = 'updates'), on: () => S.appsView === 'updates', badge: () => S.inv?.upgrades.length, hot: true },
+    { group: 'Sürücüler', label: 'Sürücü durumu', icon: 'chip', page: 'drivers', anchor: '' },
+    { label: 'Windows Update', icon: 'refresh', page: 'drivers', anchor: 'wu' },
+    { label: 'Üretici araçları', icon: 'gpu', page: 'drivers', anchor: 'vendor' },
+    { label: 'Kurulu sürücüler', icon: 'board', page: 'drivers', anchor: 'installed' },
+  ] },
+  { id: 'donanim', label: 'Donanım', icon: 'board', items: [
+    { group: 'Işıklar', label: 'Cihazlar', icon: 'light', page: 'lights', anchor: '' },
+    { label: 'Görünümler', icon: 'rainbow', page: 'lights', anchor: 'rgb-presets' },
+    { label: 'Özelleştir', icon: 'wave', page: 'lights', anchor: 'rgb-custom' },
+    { group: 'ESP32', label: 'Kart ve port', icon: 'usb', page: 'esp32', anchor: '' },
+    { label: 'Testler ve konsol', icon: 'terminal', page: 'esp32', anchor: 'esp-test' },
+    { label: 'İkiz kontrol', icon: 'activity', page: 'esp32', anchor: 'esp-twin' },
+    { label: 'Wi-Fi paneli', icon: 'globe', page: 'esp32', anchor: 'esp-wifi' },
+  ] },
+  { id: 'wexon', label: 'Wexon', icon: 'wexon', items: [
+    { group: 'Growth OS', label: 'Özet', icon: 'grid', page: 'wexon', set: () => wxTab('ozet'), on: () => W.tab === 'ozet' },
+    { label: 'Müşteriler', icon: 'users', page: 'wexon', set: () => wxTab('musteriler'), on: () => W.tab === 'musteriler' },
+    { label: 'Müşteri Bul', icon: 'mappin', page: 'wexon', set: () => wxTab('bul'), on: () => W.tab === 'bul' },
+    { label: 'WhatsApp', icon: 'message', page: 'wexon', set: () => wxTab('whatsapp'), on: () => W.tab === 'whatsapp', badge: () => W.overview?.pending || W.queue?.pendingJobs?.length, hot: true },
+    { group: 'Web stüdyosu', label: 'Site Klonlayıcı', icon: 'globe', page: 'wexon', set: () => wxTab('site'), on: () => W.tab === 'site' },
+  ] },
+  { id: 'asistan', label: 'Asistan', icon: 'sparkles', items: [
+    { label: 'Sohbet', icon: 'sparkles', page: 'assistant', set: () => (S.asstTab = 'chat'), on: () => S.asstTab !== 'memory' },
+    { label: 'Hafıza', icon: 'star', page: 'assistant', set: () => (S.asstTab = 'memory'), on: () => S.asstTab === 'memory', badge: () => M?.state?.items.length },
+  ] },
+  { id: 'ayarlar', label: 'Ayarlar', icon: 'settings', items: [
+    { label: 'Profil ve tema', icon: 'settings', page: 'settings', anchor: '' },
+    { label: 'Yapay zeka', icon: 'sparkles', page: 'settings', anchor: 'ai' },
+    { label: 'Başlangıç', icon: 'power', page: 'settings', anchor: 'startup' },
+    { label: 'Güncellemeler', icon: 'download', page: 'settings', anchor: 'update' },
+    { label: 'Kurulum geçmişi', icon: 'refresh', page: 'settings', anchor: 'history' },
+  ] },
 ];
+// Eski düz liste (başka yerlerde sayfa adı / simgesi için)
+const NAV = SECTIONS.flatMap((s) => s.items.map((i) => ({ id: i.page, label: i.label, icon: i.icon })));
+const sectionOf = (page) => SECTIONS.find((s) => s.items.some((i) => i.page === page)) || SECTIONS[0];
+/** Bölümdeki etkin alt menü öğesi */
+function activeItem(sec) {
+  const cands = sec.items.filter((i) => i.page === S.page);
+  if (!cands.length) return null;
+  if (S.sub && cands.includes(S.sub)) return S.sub;
+  return cands.find((i) => i.on && i.on()) || cands[0];
+}
 
 const S = {
   page: 'dashboard',
@@ -124,9 +170,15 @@ function pushFeed(entry) {
 
 /* ---------- Çerçeve ---------- */
 function renderChrome() {
-  $('#pills').innerHTML = NAV.map((n) => `<button class="pill ${S.page === n.id ? 'active' : ''}" data-nav="${n.id}">${n.label}</button>`).join('');
+  const sec = sectionOf(S.page);
+  const act = activeItem(sec);
+  $('#pills').innerHTML = SECTIONS.map((s) => `<button class="pill ${s === sec ? 'active' : ''}" data-section="${s.id}">${s.label}</button>`).join('');
+  const items = sec.items.map((it, i) => {
+    const b = it.badge?.();
+    return `${it.group ? `<span class="rail-label">${h(it.group)}</span>` : ''}<button class="rail-btn ${it === act ? 'active' : ''}" data-sub="${sec.id}:${i}" title="${h(it.label)}">${I(it.icon, 19)}<span class="rail-text">${h(it.label)}</span>${b ? `<em class="${it.hot ? 'hot' : ''}">${b}</em>` : ''}</button>`;
+  }).join('');
   $('#rail').innerHTML = `
-    <div class="rail-group">${NAV.map((n) => `<button class="rail-btn ${S.page === n.id ? 'active' : ''}" data-nav="${n.id}" title="${n.label}">${I(n.icon, 19)}</button>`).join('')}</div>
+    <div class="rail-group"><span class="rail-title">${I(sec.icon, 16)}<span class="rail-text">${h(sec.label)}</span></span>${items}</div>
     <div class="rail-group theme">
       <button class="rail-btn ${S.settings.theme !== 'dark' ? 'active' : ''}" data-theme-set="light" title="Açık tema">${I('sun', 19)}</button>
       <button class="rail-btn ${S.settings.theme === 'dark' ? 'active' : ''}" data-theme-set="dark" title="Koyu tema">${I('moon', 19)}</button>
@@ -136,8 +188,31 @@ function renderChrome() {
   $('#avatar').title = name;
 }
 
+/** Alt menü öğesine git: alt görünümü seç, sayfayı aç, gerekiyorsa bölüme kaydır */
+function goSub(item) {
+  item.set?.();
+  S.sub = item;
+  S.lastSub = { ...(S.lastSub || {}), [sectionOf(item.page).id]: item };
+  if (S.page !== item.page) navigate(item.page);
+  else { renderChrome(); renderPage(); }
+  scrollToAnchor(item.anchor);
+}
+function scrollToAnchor(anchor) {
+  const c = $('#content');
+  if (!anchor) return c.scrollTo({ top: 0, behavior: 'smooth' });
+  // Bölüm, sayfa verisi gelince çizilebilir: kısa süre bekle
+  let n = 0;
+  const tryIt = () => {
+    const el = document.querySelector(`[data-anchor="${anchor}"]`);
+    if (el) return c.scrollTo({ top: el.offsetTop - 12, behavior: 'smooth' });
+    if (++n < 20) setTimeout(tryIt, 150);
+  };
+  tryIt();
+}
+
 function navigate(page) {
   if (!PAGES[page]) page = 'dashboard';
+  if (S.page !== page) S.sub = null;
   S.page = page;
   saveUi({ page });
   document.getElementById('app').classList.remove('feed-open');
@@ -197,7 +272,7 @@ function readinessCard() {
   const b = S.boot;
   if (!b) return '';
   const ok = b.checks.filter((c) => c.status === 'ok').length;
-  return `<div class="card" style="margin-top:12px">
+  return `<div class="card" style="margin-top:12px" data-anchor="ready">
     <div class="card-head"><div><h3>Hazırlık kontrolü</h3><p class="sub">${ok}/${b.checks.length} kontrol geçti · ${new Date(b.at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</p></div>
       <button class="btn sm" data-action="boot-check" ${S.bootBusy ? 'disabled' : ''}>${S.bootBusy ? '<span class="spinner"></span>' : I('refresh')}Yeniden kontrol</button>
       ${b.ready ? `<button class="icon-btn sm" data-action="boot-toggle" title="Kapat">${I('x')}</button>` : ''}</div>
@@ -423,9 +498,9 @@ PAGES.drivers = () => {
     </div>
     ${problems.length ? `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Sorunlu cihazlar</h3><p class="sub">Aygıt Yöneticisi'nde sürücüsü eksik veya hatalı görünenler</p></div></div>
       <div class="rec-list">${problems.map((p) => `<div class="rec-item"><span style="color:var(--danger)">${I('alert')}</span><div class="txt"><b>${h(p.name || 'Bilinmeyen aygıt')}</b><p>Hata kodu ${p.code} · ${h(p.id)}</p></div></div>`).join('')}</div></div>` : ''}
-    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Windows Update sürücüleri</h3><p class="sub">Donanım kimliğine göre bu bilgisayar için onaylı, henüz kurulmamış sürücüler</p></div></div><div class="table-wrap">${wu}</div></div>
-    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Üretici araçları</h3><p class="sub">Algılanan donanıma göre; kurulu olanlar işaretli</p></div></div><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
-    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div><div class="table-wrap">${installedTable}</div></div>`;
+    <div class="card" style="margin-top:14px" data-anchor="wu"><div class="card-head"><div><h3>Windows Update sürücüleri</h3><p class="sub">Donanım kimliğine göre bu bilgisayar için onaylı, henüz kurulmamış sürücüler</p></div></div><div class="table-wrap">${wu}</div></div>
+    <div class="card" style="margin-top:14px" data-anchor="vendor"><div class="card-head"><div><h3>Üretici araçları</h3><p class="sub">Algılanan donanıma göre; kurulu olanlar işaretli</p></div></div><div class="rec-list">${recs || '<div class="empty"><span class="spinner"></span></div>'}</div></div>
+    <div class="card" style="margin-top:14px" data-anchor="installed"><div class="card-head"><div><h3>Kurulu sürücüler</h3><p class="sub">Yeşil: 1 yıldan yeni · Sarı: 1-2 yıl · Kırmızı: 2 yıldan eski</p></div><button class="btn sm" data-action="reload-drivers">${I('refresh')}Yenile</button></div><div class="table-wrap">${installedTable}</div></div>`;
 };
 /** AMD paketinin resmi sayfadaki güncel sürümü (öneri kartında) */
 const amdLatestOf = (r) => S.amdLatest?.[r.amdKind];
@@ -468,7 +543,7 @@ PAGES.apps = () => {
       <div class="row">${view === 'catalog' ? `<button class="btn" data-action="select-rec">${I('star')}Önerilenleri seç</button>` : ''}<button class="btn primary" data-action="add-app">${I('plus')}Program ekle</button></div></div>
     <div class="row inv-row">${invSummary()}</div>
     ${(S.appsView || 'catalog') === 'catalog' ? profilesRow() : ''}
-    <div class="toolbar">${tabs}<label class="search">${I('search')}<input id="appSearch" placeholder="${view === 'pc' ? 'Bu bilgisayarda ara…' : 'Program ara…'}" value="${h(S.query)}"></label></div>`;
+    <div class="toolbar"><label class="search">${I('search')}<input id="appSearch" placeholder="${view === 'pc' ? 'Bu bilgisayarda ara…' : 'Program ara…'}" value="${h(S.query)}"></label></div>`;
 
   if (view === 'pc') {
     const list = (S.inv?.programs || []).filter((p) => !q || p.name.toLowerCase().includes(q) || (p.publisher || '').toLowerCase().includes(q));
@@ -549,11 +624,11 @@ PAGES.assistant = () => {
   const ready = S.settings.aiProvider === 'ollama' || S.settings.hasApiKey;
   const tabs = `<div class="seg dark"><button class="${S.asstTab !== 'memory' ? 'active' : ''}" data-asst-tab="chat">${I('sparkles', 15)}Sohbet</button><button class="${S.asstTab === 'memory' ? 'active' : ''}" data-asst-tab="memory">${I('star', 15)}Hafıza</button></div>`;
   if (S.asstTab === 'memory') {
-    return `<div class="page-head"><div><h1>Asistan</h1><p>Seni tanıyan ve sürekli öğrenen kişisel yapay zekan · ${h(provider)}</p></div><div class="row">${tabs}</div></div>${memoryView()}`;
+    return `<div class="page-head"><div><h1>Hafıza</h1><p>Orbit'in senin hakkında bildikleri · ${h(provider)}</p></div></div>${memoryView()}`;
   }
   return `
     <div class="page-head"><div><h1>Asistan</h1><p>Seni tanıyan ve sürekli öğrenen kişisel yapay zekan · ${h(provider)}</p></div>
-      <div class="row">${tabs}<button class="btn" data-action="clear-chat">${I('trash')}Sohbeti temizle</button></div></div>
+      <div class="row"><button class="btn" data-action="clear-chat">${I('trash')}Sohbeti temizle</button></div></div>
     ${ready ? '' : `<div class="banner">${I('sparkles')}<p>Asistanı kullanmak için Ayarlar'dan Claude API anahtarı ekleyin veya yerel model (Ollama) seçin.</p><button class="btn primary sm" data-nav="settings">Ayarlara git</button></div>`}
     <div class="card chat">
       <div class="chat-list" id="chatList">
@@ -589,7 +664,7 @@ PAGES.settings = () => {
         <div class="field"><label>Kurulum profili</label><small>Seçtiğin programlar, özel programların ve RGB profillerin tek dosyada. Format öncesi dışa aktarıp USB'de sakla; format sonrası içe aktar ve "Hepsini Kur".</small>
           <div class="row"><button class="btn" data-action="export">${I('upload')}Dışa aktar</button><button class="btn" data-action="import">${I('download')}İçe aktar</button></div></div>
       </div>
-      <div class="card form">
+      <div class="card form" data-anchor="ai">
         <h3>Yapay Zeka</h3>
         <div class="field"><label>Sağlayıcı</label>
           <select class="input" data-auto="aiProvider"><option value="anthropic" ${s.aiProvider === 'anthropic' ? 'selected' : ''}>Claude (Anthropic API)</option><option value="ollama" ${s.aiProvider === 'ollama' ? 'selected' : ''}>Ollama (yerel, internetsiz)</option></select></div>
@@ -603,12 +678,12 @@ PAGES.settings = () => {
       </div>
     </div>
     <div class="two">
-      <div class="card form">
+      <div class="card form" data-anchor="startup">
         <h3>Başlangıç ve arka plan</h3>
         ${sw('startWithWindows', 'Windows açılınca arka planda başlat', 'Son RGB görünümün her açılışta otomatik geri gelir.')}
         ${sw('minimizeToTray', 'Kapatınca sistem tepsisine küçült', 'Işık efektleri ve güncelleme denetimi çalışmaya devam eder.')}
       </div>
-      <div class="card form">
+      <div class="card form" data-anchor="update">
         <h3>Güncellemeler ve hakkında</h3>
         <p class="sub"><b>Orbit</b>, wexon.dev'in ürünüdür ve yalnızca ${h(S.settings.userName || 'sana')} için özelleştirilir.</p>
         <p class="sub">Orbit <b>v${h(S.version)}</b> · ${h(updateText())}</p>
@@ -620,7 +695,7 @@ PAGES.settings = () => {
         <div class="row"><button class="btn" data-action="open-logs">${I('terminal')}Günlük klasörü</button><button class="btn" data-open="https://github.com/mlevncomm/orbit/releases">${I('external')}Sürüm notları</button></div>
       </div>
     </div>
-    <div class="card" style="margin-top:14px"><h3>Kurulum geçmişi</h3><div class="sub" style="margin-top:8px">
+    <div class="card" style="margin-top:14px" data-anchor="history"><h3>Kurulum geçmişi</h3><div class="sub" style="margin-top:8px">
       ${hist.length ? `<table class="table"><tbody>${hist.map((x) => `<tr><td>${h(x.name)}</td><td><span class="status-dot ${x.status}" style="display:inline-block"></span> ${h(statusLabel(x))}</td><td>${new Date(x.at).toLocaleString('tr-TR')}</td></tr>`).join('')}</tbody></table>` : 'Henüz kurulum yapılmadı.'}
     </div></div>`;
 };
@@ -842,7 +917,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-asst-tab],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
+  const t = e.target.closest('[data-section],[data-sub],[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-asst-tab],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
   if (!t) return;
   const d = t.dataset;
 
@@ -853,6 +928,11 @@ document.addEventListener('click', async (e) => {
     S.catalog = await api.catalog.get();
     return renderPage();
   }
+  if (d.section) {
+    const sec = SECTIONS.find((s) => s.id === d.section);
+    return goSub(S.lastSub?.[sec.id] || sec.items[0]);
+  }
+  if (d.sub) { const [sid, i] = d.sub.split(':'); return goSub(SECTIONS.find((s) => s.id === sid).items[+i]); }
   if (d.nav) { navigate(d.nav); if ('focusSearch' in d) $('#appSearch')?.focus(); return; }
   if (d.toggle) { S.selection.has(d.toggle) ? S.selection.delete(d.toggle) : S.selection.add(d.toggle); persistSelection(); return renderPage(); }
   if (d.cat) { S.cat = d.cat; saveUi({ cat: d.cat }); return renderPage(); }

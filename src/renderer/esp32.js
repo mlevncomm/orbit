@@ -32,7 +32,7 @@ function twinCards(dev) {
   const hist = (E.history || []).slice(0, 12);
   return `
     <div class="esp-grid">
-      <div class="card form">
+      <div class="card form" data-anchor="esp-twin">
         <h3>İkiz kontrol</h3>
         <p class="sub">Kart, Orbit'in durumunu 3 sn'de bir alır (ışıklar, kurulum kuyruğu, güncellemeler, CPU/RAM). Karttan gelen istekler yalnızca aşağıdaki <b>izin listesindeki</b> eylemleri tetikleyebilir.</p>
         <label class="switch"><input type="checkbox" data-setting="esp32AutoConnect" ${s.esp32AutoConnect !== false ? 'checked' : ''}><span>Açılışta ve kart takılınca otomatik bağlan<small>Son bağlanılan port: ${h(s.esp32LastPort || 'henüz yok')}. Elle "Bağlantıyı kes" dersen, sen tekrar bağlanana kadar beklenir.</small></span></label>
@@ -43,7 +43,7 @@ function twinCards(dev) {
           <ul class="acts">${acts.map((a) => `<li><code>${h(a.id)}</code> ${h(a.label)} <span class="badge ${a.level === 'confirm' ? 'upd' : ''}">${LEVEL_TEXT[a.level] || a.level}</span></li>`).join('')}</ul>
           <p class="sub">Listede olmayan hiçbir istek çalıştırılmaz; kart bilgisayarda komut çalıştıramaz.</p></details>
       </div>
-      <div class="card form">
+      <div class="card form" data-anchor="esp-wifi">
         <h3>Wi-Fi kontrol paneli</h3>
         <p class="sub">Kart ev ağına bağlanır ve telefondan açılan bir panel sunar: ışıklar, tema, güncellemeler, sürücüler, asistan. Panel, Orbit'in ürettiği gizli anahtar olmadan hiçbir isteği kabul etmez. Wi-Fi şifresi yalnızca kartta saklanır, Orbit'e kaydedilmez.</p>
         <div class="kv"><span>Durum</span><b>${w.connected ? `Bağlı · ${h(w.ssid || '')} · ${h(w.ip || '')} · ${h(w.rssi ?? '')} dBm` : w.configured ? `Bağlanıyor… (${h(w.ssid || '')})` : 'Kapalı'}</b></div>
@@ -132,7 +132,7 @@ PAGES.esp32 = () => {
       </div>
     </div>
     <div class="esp-grid">
-      <div class="card form">
+      <div class="card form" data-anchor="esp-test">
         <h3>Testler ve komutlar</h3>
         <div class="row">
           <button class="btn" data-esp="ping" ${dev ? '' : 'disabled'}>${I('activity')}Ping</button>

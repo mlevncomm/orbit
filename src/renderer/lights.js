@@ -141,11 +141,11 @@ PAGES.lights = () => {
     <div class="devices">${devices}</div>
     ${devPanel}
 
-    <div class="section-title">Görünümler</div>
+    <div class="section-title" data-anchor="rgb-presets">Görünümler</div>
     <div class="presets">${st.presets.map((p) => preset(p)).join('')}</div>
     ${st.profiles.length ? `<div class="section-title">Profillerim</div><div class="presets">${st.profiles.map((p) => preset(p, true)).join('')}</div>` : ''}
 
-    <div class="section-title">Özelleştir <em>değişiklikler ışıklara anında uygulanır</em></div>
+    <div class="section-title" data-anchor="rgb-custom">Özelleştir <em>değişiklikler ışıklara anında uygulanır</em></div>
     <div class="card studio">
       <div class="form">
         ${rgbPreview(d, 'tall')}

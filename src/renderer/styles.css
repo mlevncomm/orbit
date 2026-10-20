@@ -715,3 +715,56 @@ button.stat { cursor: pointer; }
 .wx-site-opts .field { display: flex; align-items: center; gap: 8px; }
 .wx-site-opts .input.sm { width: 80px; }
 .page-banner .status-dot { vertical-align: middle; }
+
+/* =====================================================================
+   Menü 2.1 — üstte ana bölümler, solda alt menüler (etiketli)
+   ===================================================================== */
+.shell { grid-template-columns: 232px minmax(0, 1fr) 380px; }
+.rail { align-items: stretch; padding: 4px 0 2px; }
+.rail-group { padding: 10px; gap: 2px; border-radius: 26px; overflow-y: auto; scrollbar-width: none; }
+.rail-group::-webkit-scrollbar { display: none; }
+.rail-title { display: flex; align-items: center; gap: 10px; padding: 8px 10px 12px; font-size: 18px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+.rail-title svg { width: 18px; height: 18px; color: var(--muted); }
+.rail-label { display: block; padding: 14px 12px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.rail-btn { width: 100%; height: 46px; justify-content: flex-start; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 15px; font-size: 14.5px; font-weight: 500; text-align: left; }
+.rail-btn svg { width: 19px; height: 19px; }
+.rail-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-btn em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.rail-btn em.hot { color: #fff; background: var(--danger); border-radius: 8px; padding: 1px 7px; }
+.rail-btn.active em { color: inherit; opacity: .7; }
+.rail-btn.active em.hot { opacity: 1; }
+.rail-group.theme { flex-direction: row; justify-content: center; padding: 6px; }
+.rail-group.theme .rail-btn { width: 48px; height: 44px; justify-content: center; padding: 0; }
+.rail-group.theme .rail-text { display: none; }
+.pill { padding: 0 20px; }
+@media (max-width: 1500px) {
+  .shell { grid-template-columns: 210px minmax(0, 1fr) 340px; }
+}
+@media (max-width: 1240px) {
+  .shell { grid-template-columns: 200px minmax(0, 1fr); }
+}
+/* Orta genişlik: alt menü yalnızca simge */
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: 66px minmax(0, 1fr); }
+  .rail-group { padding: 6px; }
+  .rail-title, .rail-label, .rail-text, .rail-btn em { display: none; }
+  .rail-btn { width: 52px; height: 52px; justify-content: center; padding: 0; border-radius: 17px; }
+  .rail-group.theme { flex-direction: column; }
+  .rail-group.theme .rail-btn { width: 52px; height: 48px; }
+}
+/* Telefon: ana bölümler üstte kaydırılabilir, alt menü altta çubuk */
+@media (max-width: 760px) {
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .pills { display: flex; overflow-x: auto; }
+  .brand-name { display: none; }
+  .pill { height: 38px; padding: 0 12px; font-size: 13.5px; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .rail-group { flex-direction: row; overflow-x: auto; max-width: calc(100vw - 20px); }
+  .rail-btn { flex-shrink: 0; width: 48px; height: 48px; }
+}
+
+.wx-site-opts .seg label { padding: 9px 16px; border-radius: 13px; font-size: 13.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; }
+.wx-site-opts .seg label.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.wx-site-opts .switch small { font-size: 11.5px; }
+.wx-auth { margin-top: 16px; padding: 14px 16px; border-radius: 16px; background: var(--surface-2); }
+@media (max-width: 1100px) { .brand-name small { display: none; } .pill { padding: 0 12px; font-size: 14px; } }

@@ -12,6 +12,10 @@ const { EventEmitter } = require('events');
 const { execFile } = require('child_process');
 const { app } = require('electron');
 const log = require('./log');
+const { Renderer, renderOffline, similarity } = require('./site-render');
+
+// İçerik türü → uzantı (uzantısız adreslerdeki dosyalar yerelde doğru açılsın: /_next/image?url=… gibi)
+const TYPE_EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/avif': '.avif', 'image/gif': '.gif', 'image/svg+xml': '.svg', 'image/x-icon': '.ico', 'image/vnd.microsoft.icon': '.ico', 'font/woff2': '.woff2', 'font/woff': '.woff', 'font/ttf': '.ttf', 'font/otf': '.otf', 'application/font-woff2': '.woff2', 'application/font-woff': '.woff', 'text/css': '.css', 'text/javascript': '.js', 'application/javascript': '.js', 'application/json': '.json', 'video/mp4': '.mp4', 'video/webm': '.webm' };
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 OrbitSiteDownloader/1.0 (+https://wexon.dev)';
 const MAX_FILE = 40 * 1024 * 1024;
@@ -37,7 +41,7 @@ const H = {
       for (const part of (m[2] ?? m[3]).split(',')) add(part.trim().split(/\s+/)[0], 'asset');
     }
     for (const m of html.matchAll(/<meta\b[^>]*?(?:property|name)\s*=\s*["'](?:og:image|twitter:image)["'][^>]*?content\s*=\s*["']([^"']+)["']/gi)) add(m[1], 'asset');
-    for (const r of H.cssRefs(html)) out.push(r); // <style> ve style="" içindeki url()
+    for (const r of H.cssRefs(html.replace(/&quot;/g, "'"))) out.push(r); // <style> ve style="" içindeki url()
     return out;
   },
   /** CSS'teki url(...) ve @import başvuruları */
@@ -80,6 +84,19 @@ const H = {
     }
     return rules;
   },
+  /** Statik klon: betikler, betik ön yüklemeleri ve <noscript> (sayfa zaten çizildi) kaldırılır; JSON-LD kalır */
+  stripScripts(html) {
+    return html
+      .replace(/<script\b(?![^>]*application\/ld\+json)[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '')
+      .replace(/<link\b[^>]*\brel\s*=\s*["']?(modulepreload|prefetch)["']?[^>]*>/gi, '')
+      .replace(/<link\b[^>]*\bas\s*=\s*["']?(script|fetch)["']?[^>]*>/gi, '');
+  },
+  extFor(local, type) {
+    if (path.posix.extname(local.replace(/_[0-9a-f]{8}$/, ''))) return local;
+    const e = TYPE_EXT[String(type).split(';')[0].trim().toLowerCase()];
+    return e ? local + e : local;
+  },
   allowed(rules, pathname) { return !rules.some((r) => pathname.startsWith(r.replace(/\*.*$/, ''))); },
   isPageLike(u) { return !ASSET_EXT.test(u.pathname) && (PAGE_EXT.test(u.pathname) || !path.posix.extname(u.pathname)); },
 };
@@ -94,7 +111,8 @@ class SiteDownloader extends EventEmitter {
       id: j.id, url: j.start, host: j.host, state: j.state, dir: j.dir, zip: j.zip || null,
       pages: j.pagesDone, pageLimit: j.opts.maxPages, queued: j.pageQueue.length, assets: j.assetsDone,
       bytes: j.bytes, errors: j.errors.length, errorList: j.errors.slice(-20), current: j.current, startedAt: j.startedAt, endedAt: j.endedAt || null,
-      skippedRobots: j.skippedRobots,
+      skippedRobots: j.skippedRobots, mode: j.opts.render ? 'render' : 'fast', scripts: j.opts.scripts,
+      phase: j.phase, similarity: j.similarity || null,
     };
   }
   emitStatus() { const now = Date.now(); if (now - (this.lastEmit || 0) > 250 || this.job.state !== 'running') { this.lastEmit = now; this.emit('status', this.snapshot()); } }
@@ -113,7 +131,12 @@ class SiteDownloader extends EventEmitter {
       robots: o.robots !== false,
       zip: o.zip !== false,
       delayMs: 250,
+      render: o.render !== false,                       // tarayıcıda çiz (JS ile oluşan siteler birebir)
+      scripts: o.scripts === 'keep' ? 'keep' : 'strip', // statik klon varsayılan: betikler kaldırılır
+      verify: o.verify !== false,                       // klonu orijinalle karşılaştır
     };
+    // Birebir kopya yalnızca sahibi olunan ya da izin alınan siteler için (telif / kimlik taklidi riski)
+    if (o.authorized !== true) throw new Error('Klonlamadan önce bu sitenin sana ait olduğunu ya da sahibinden izin aldığını onaylamalısın');
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
     const root = path.join(app.getPath('documents'), 'Orbit Siteler');
     const dir = path.join(root, `${u.host.replace(/[:]/g, '_')}_${stamp}`);
@@ -122,7 +145,8 @@ class SiteDownloader extends EventEmitter {
       id: crypto.randomUUID(), start: u.href, host: u.host, dir, opts, state: 'running', startedAt: Date.now(),
       pageQueue: [{ u, depth: 0 }], seenPages: new Set([u.href]), seenAssets: new Set(), assetQueue: [],
       pages: new Map(), cssFiles: new Map(), pagesDone: 0, assetsDone: 0, bytes: 0, errors: [], current: u.href,
-      robotRules: [], skippedRobots: 0, cancelled: false,
+      robotRules: [], skippedRobots: 0, cancelled: false, phase: 'pages',
+      assetPaths: new Map(), shots: new Map(), similarity: null,
     };
     log.info(`Site indirme başladı: ${u.href} (en çok ${opts.maxPages} sayfa, derinlik ${opts.maxDepth})`);
     this.run().catch((e) => { this.job.state = 'error'; this.job.errors.push({ url: this.job.current, error: e.message }); this.job.endedAt = Date.now(); this.emitStatus(); log.warn('Site indirme hatası', e); });
@@ -170,7 +194,13 @@ class SiteDownloader extends EventEmitter {
       if (j.opts.robots && !H.allowed(j.robotRules, u.pathname)) { j.skippedRobots++; continue; }
       j.current = u.href; this.emitStatus();
       try {
-        const { buf, type, finalUrl } = await this.fetchBuf(u.href, 'text/html,application/xhtml+xml,*/*');
+        let buf, type, finalUrl, rendered = null;
+        if (j.opts.render) {
+          if (!j.renderer) j.renderer = new Renderer(j.id, UA, (host) => H.sameSite(host, j.host) || j.pages.size === 0);
+          rendered = await j.renderer.render(u.href);
+          ({ finalUrl } = rendered); buf = Buffer.from(rendered.html); type = 'text/html';
+          j.bytes += buf.length;
+        } else ({ buf, type, finalUrl } = await this.fetchBuf(u.href, 'text/html,application/xhtml+xml,*/*'));
         // Başlangıç adresi yönlendirirse (ör. wexon.dev → www.wexon.dev) sitenin adresi son adres olur
         if (j.pagesDone === 0 && !j.pages.size && finalUrl.host !== j.host) { log.info(`Site adresi yönlendirildi: ${j.host} → ${finalUrl.host}`); j.host = finalUrl.host; }
         if (!H.sameSite(finalUrl.host, j.host)) throw new Error('Başka bir alan adına yönlendirdi');
@@ -180,6 +210,11 @@ class SiteDownloader extends EventEmitter {
         const html = buf.toString('utf8');
         const local = H.localPath(u, j.host, true);
         j.pages.set(local, { url: finalUrl, html });
+        if (rendered) {
+          j.shots.set(local, rendered.shot);
+          // Tarayıcının gerçekten yüklediği her dosya (CSS içinden gelen yazı tipleri, sonradan yüklenen görseller)
+          for (const r of rendered.resources) { try { this.queueAsset(new URL(r)); } catch {} }
+        }
         for (const r of H.htmlRefs(html)) {
           let abs; try { abs = new URL(r.raw, finalUrl); } catch { continue; }
           abs.hash = '';
@@ -202,7 +237,8 @@ class SiteDownloader extends EventEmitter {
         j.current = a.href; this.emitStatus();
         try {
           const { buf, type } = await this.fetchBuf(a.href);
-          const local = H.localPath(a, j.host, false);
+          const local = H.extFor(H.localPath(a, j.host, false), type);
+          j.assetPaths.set(a.href, local);
           if (/\.css$/i.test(a.pathname) || /text\/css/i.test(type)) {
             const css = buf.toString('utf8');
             j.cssFiles.set(local, { url: a, css });
@@ -212,7 +248,9 @@ class SiteDownloader extends EventEmitter {
         } catch (e) { j.errors.push({ url: a.href, error: e.message }); }
       }
     };
-    await Promise.all([worker(), worker(), worker(), worker()]);
+    j.phase = 'assets';
+    await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+    j.phase = 'write';
 
     // 3) Bağlantıları yerel dosyalara çevir ve yaz
     const downloadedPages = new Set(j.pages.keys());
@@ -225,8 +263,8 @@ class SiteDownloader extends EventEmitter {
         return downloadedPages.has(lp) ? H.rel(fromLocal, lp, hash) : abs.href + hash; // indirilmediyse çevrim içi
       }
       if (kind === 'page' && !H.sameSite(abs.host, j.host)) return null; // dış site bağlantısı olduğu gibi kalır
-      if (!j.seenAssets.has(abs.href)) return null;
-      return H.rel(fromLocal, H.localPath(abs, j.host, false), hash);
+      const lp = j.assetPaths.get(abs.href);
+      return lp ? H.rel(fromLocal, lp, hash) : null;
     };
     const rewriteCss = (css, base, fromLocal) => css
       .replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (m, q, raw) => { const r = mapRef(raw.trim(), base, fromLocal, 'asset'); return r ? `url(${q}${r}${q})` : m; })
@@ -234,7 +272,7 @@ class SiteDownloader extends EventEmitter {
 
     for (const [local, { url, css }] of j.cssFiles) this.write(local, rewriteCss(css, url, local));
     for (const [local, { url, html }] of j.pages) {
-      let out = html
+      let out = (j.opts.scripts === 'strip' && j.opts.render ? H.stripScripts(html) : html)
         .replace(/<base\b[^>]*>/gi, '')
         .replace(/\s(integrity|crossorigin)\s*=\s*("[^"]*"|'[^']*')/gi, '')
         .replace(/(<(?:a|area)\b[^>]*?\bhref\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => { const raw = d ?? s; const r = mapRef(raw, url, local, 'page'); return r ? `${pre}"${r}"` : m; })
@@ -242,12 +280,35 @@ class SiteDownloader extends EventEmitter {
         .replace(/(\b(?:src|poster|data-src|data-original|data-lazy-src)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => { const r = mapRef(d ?? s, url, local, 'asset'); return r ? `${pre}"${r}"` : m; })
         .replace(/(\b(?:srcset|data-srcset)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => `${pre}"${(d ?? s).split(',').map((part) => { const [u0, ...rest] = part.trim().split(/\s+/); const r = mapRef(u0, url, local, 'asset'); return [r || u0, ...rest].join(' '); }).join(', ')}"`)
         .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, a, css, b) => a + rewriteCss(css, url, local) + b)
-        .replace(/(\sstyle\s*=\s*")([^"]*)(")/gi, (m, a, css, b) => a + rewriteCss(css, url, local) + b);
+        .replace(/(\sstyle\s*=\s*")([^"]*)(")/gi, (m, a, css, b) => a + rewriteCss(css.replace(/&quot;/g, "'"), url, local).replace(/"/g, '&quot;') + b);
       this.write(local, out);
     }
 
-    // 4) Özet ve zip
-    const summary = { kaynak: j.start, indirilme: new Date().toISOString(), sayfa: j.pagesDone, dosya: j.assetsDone, boyutMB: +(j.bytes / 1048576).toFixed(1), hatalar: j.errors, robotsAtlanan: j.skippedRobots, arac: 'Orbit Site İndirici · wexon.dev' };
+    // 4) Doğrulama: klonu internetsiz aç, orijinal ekranla karşılaştır
+    if (j.opts.render && j.opts.verify && !j.cancelled && j.shots.size) {
+      j.phase = 'verify';
+      const rows = []; let blocked = 0;
+      fs.mkdirSync(path.join(j.dir, '_orbit'), { recursive: true });
+      let n = 0;
+      for (const [local, orig] of [...j.shots].slice(0, 10)) {
+        j.current = `Karşılaştırılıyor: ${local}`; this.emitStatus();
+        try {
+          const r = await renderOffline(path.join(j.dir, ...local.split('/')), j.id);
+          blocked += r.blocked;
+          const score = similarity(orig, r.shot);
+          n++;
+          fs.writeFileSync(path.join(j.dir, '_orbit', `${n}-orijinal.png`), orig);
+          fs.writeFileSync(path.join(j.dir, '_orbit', `${n}-klon.png`), r.shot);
+          rows.push({ page: local, score, original: path.join(j.dir, '_orbit', `${n}-orijinal.png`), clone: path.join(j.dir, '_orbit', `${n}-klon.png`) });
+        } catch (e) { j.errors.push({ url: local, error: 'Karşılaştırma: ' + e.message }); }
+      }
+      const avg = rows.length ? +(rows.reduce((t, r) => t + r.score, 0) / rows.length).toFixed(1) : null;
+      j.similarity = { avg, blocked, pages: rows };
+      log.info(`Klon benzerliği: ortalama %${avg} (${rows.length} sayfa), çevrimdışı açılışta ${blocked} internet isteği engellendi`);
+    }
+
+    // 5) Özet ve zip
+    const summary = { kaynak: j.start, indirilme: new Date().toISOString(), sayfa: j.pagesDone, dosya: j.assetsDone, boyutMB: +(j.bytes / 1048576).toFixed(1), hatalar: j.errors, robotsAtlanan: j.skippedRobots, yontem: j.opts.render ? 'tarayıcıda çizim' : 'yalnızca HTML', betikler: j.opts.scripts, benzerlik: j.similarity, arac: 'Orbit Site Klonlayıcı · wexon.dev' };
     fs.writeFileSync(path.join(j.dir, '_orbit-ozet.json'), JSON.stringify(summary, null, 2));
     if (j.cancelled) { j.state = 'cancelled'; }
     else {
@@ -259,7 +320,8 @@ class SiteDownloader extends EventEmitter {
       }
       j.state = 'done';
     }
-    j.current = ''; j.endedAt = Date.now();
+    j.current = ''; j.endedAt = Date.now(); j.phase = 'done';
+    j.renderer = null;
     log.info(`Site indirme bitti (${j.state}): ${j.pagesDone} sayfa, ${j.assetsDone} dosya, ${(j.bytes / 1048576).toFixed(1)} MB, ${j.errors.length} hata`);
     this.emitStatus();
     this.emit('done', this.snapshot());
