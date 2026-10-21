@@ -38,6 +38,7 @@ const SECTIONS = [
     { label: 'Müşteriler', icon: 'users', page: 'wexon', set: () => wxTab('musteriler'), on: () => W.tab === 'musteriler' },
     { label: 'Müşteri Bul', icon: 'mappin', page: 'wexon', set: () => wxTab('bul'), on: () => W.tab === 'bul' },
     { label: 'WhatsApp', icon: 'message', page: 'wexon', set: () => wxTab('whatsapp'), on: () => W.tab === 'whatsapp', badge: () => W.overview?.pending || W.queue?.pendingJobs?.length, hot: true },
+    { label: 'Şablonlar', icon: 'star', page: 'wexon', set: () => wxTab('sablonlar'), on: () => W.tab === 'sablonlar' },
     { label: 'Ayarlar ve WhatsApp', icon: 'settings', page: 'wexon', set: () => wxTab('ayarlar'), on: () => W.tab === 'ayarlar' },
     { group: 'Web stüdyosu', label: 'Site Klonlayıcı', icon: 'globe', page: 'wexon', set: () => wxTab('site'), on: () => W.tab === 'site' },
   ] },

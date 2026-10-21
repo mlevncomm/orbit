@@ -2,8 +2,9 @@
 //
 // - Sunucu yalnızca 127.0.0.1'de, Orbit'in seçtiği boş bir portta çalışır; internete açılmaz.
 // - Veri: userData/growth/growth.db (SQLite). İlk açılışta boş şablon veritabanı kopyalanır.
-// - Oturum sırrı (AUTH_SECRET) ve profil şifresi Orbit tarafından üretilir, Windows hesabıyla şifreli saklanır;
-//   kullanıcı PIN girmez, Orbit profili kendisi açar.
+// - Oturum sırrı (AUTH_SECRET) Orbit tarafından üretilir, Windows hesabıyla şifreli saklanır.
+// - Profil şifrelerini (PIN) kullanıcı belirler; yalnızca scrypt özeti saklanır (şifreli). Doğrulamayı ve
+//   yanlış denemede kilitlemeyi Growth OS sunucusu kendisi yapar.
 // - Eski (Vercel / Supabase) Growth OS'a hiçbir bağ yoktur; veriler isteğe bağlı, bir kerelik taşınır.
 const fs = require('fs');
 const net = require('net');
@@ -39,6 +40,35 @@ function secrets() {
   return s;
 }
 
+// ---------- Profil şifreleri ----------
+function pinHashes() {
+  const v = store.get('growthPins');
+  if (!v) return {};
+  try { return JSON.parse(dec(v)); } catch { return {}; }
+}
+const hasPin = (tenantId) => Boolean(pinHashes()[tenantId]);
+function verifyPin(tenantId, pin) {
+  const h = pinHashes()[tenantId];
+  if (!h) return false;
+  const [salt, hash] = h.split(':');
+  const a = Buffer.from(hash, 'hex');
+  const b = crypto.scryptSync(String(pin), salt, 64);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+/** Profil şifresini belirler / değiştirir. Değiştirirken mevcut şifre doğrulanır. Sunucu yeni özetle yeniden başlar. */
+async function setPin(tenantId, pin, current) {
+  if (!TENANTS.includes(tenantId)) throw new Error('Geçersiz profil');
+  if (!/^\d{4,8}$/.test(String(pin))) throw new Error('Şifre 4-8 rakam olmalı');
+  if (hasPin(tenantId) && !verifyPin(tenantId, current)) throw new Error('Mevcut şifre yanlış');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const map = { ...pinHashes(), [tenantId]: `${salt}:${crypto.scryptSync(String(pin), salt, 64).toString('hex')}` };
+  store.set('growthPins', enc(JSON.stringify(map)));
+  log.info(`Growth OS profil şifresi ${current ? 'değiştirildi' : 'belirlendi'}: ${tenantId}`);
+  stop();
+  await start();
+  return true;
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -69,7 +99,7 @@ function env(p, s) {
     APP_URL: `http://127.0.0.1:${p}`,
     DATABASE_URL: 'file:' + DB().replace(/\\/g, '/'),
     AUTH_SECRET: s.authSecret,
-    PROFIL_PIN_OZETLERI: JSON.stringify(Object.fromEntries(TENANTS.map((t) => [t, s.pinHash]))),
+    PROFIL_PIN_OZETLERI: JSON.stringify(pinHashes()),
     // Growth OS güvenlik kilidi: onaylı mesajların otomatik gönderimi yalnızca kullanıcı açarsa
     ...(store.get('settings').growthSending ? { WA_SENDING_ENABLED: '1' } : {}),
   };
@@ -153,4 +183,4 @@ async function importFrom(databaseUrl) {
   return { counts: result.counts, backup };
 }
 
-module.exports = { start, stop, url, secrets, importFrom, DB, ROOT };
+module.exports = { start, stop, url, secrets, importFrom, hasPin, setPin, DB, ROOT, TENANTS };

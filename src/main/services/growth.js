@@ -3,7 +3,7 @@
 //
 // Güvenlik:
 // - İstekler yalnızca ana süreçten gider; oturum çerezleri arayüze HİÇ verilmez ve yalnızca bellekte tutulur.
-// - Profil şifresini Orbit kendisi üretir ve saklar; kullanıcı PIN girmez.
+// - Profiller kullanıcının belirlediği şifreyle (PIN) açılır; doğrulama ve kilitleme Growth OS sunucusundadır.
 const store = require('./store');
 const log = require('./log');
 
@@ -46,13 +46,14 @@ const status = () => ({ connected: !!jar.wexon_admin && !!jar.wexon_profil, prof
 
 async function profiles() {
   const r = await call('GET', '/api/profil');
-  return (r.profiller || []).map((p) => ({ tenantId: p.tenantId, name: p.ad, desc: p.aciklama, field: p.alan, letter: p.harf, color: p.renk, accent: p.vurgu, pinLength: p.pinUzunluk, pinSet: p.sifreAyarli, lockedUntil: p.kilitBitis, lastOpened: p.sonAcilis }));
+  return (r.profiller || []).map((p) => ({ pinSet: server.hasPin(p.tenantId), lockedUntil: p.kilitBitis, ...({ tenantId: p.tenantId, name: p.ad, desc: p.aciklama, field: p.alan, letter: p.harf, color: p.renk, accent: p.vurgu, lastOpened: p.sonAcilis }) }));
 }
 
-async function open(tenantId) {
+async function open(tenantId, pin) {
   if (!/^tnt_[\w-]+$/.test(String(tenantId))) throw new Error('Geçersiz profil');
+  if (!/^\d{4,8}$/.test(String(pin || ''))) throw new Error('Şifre 4-8 rakam olmalı');
   jar = {};
-  const r = await call('POST', '/api/profil', { tenantId, pin: server.secrets().pin });
+  const r = await call('POST', '/api/profil', { tenantId, pin: String(pin) });
   profileName = r.profil || null;
   log.info(`Growth OS profili açıldı: ${profileName}`);
   return status();
@@ -139,6 +140,57 @@ function whatsappAction(action) {
   if (!['connect', 'disconnect'].includes(action)) throw new Error('Geçersiz işlem');
   return call('POST', '/api/whatsapp', { action });
 }
+// ---------- Müşteriye mesaj (WhatsApp penceresi) ----------
+const ID = /^[\w-]{6,40}$/;
+const CATS = ['ilk_temas', 'otomasyon', 'bakim', 'huni', 'takip', 'ilgili', 'fiyat', 'itiraz', 'kapanis'];
+function message(id) {
+  if (!ID.test(String(id))) throw new Error('Geçersiz kayıt');
+  return call('GET', `/api/leads/${id}/mesaj`);
+}
+function messageAction(id, b) {
+  if (!ID.test(String(id))) throw new Error('Geçersiz kayıt');
+  if (!['generate', 'refine', 'record'].includes(b.action)) throw new Error('Geçersiz işlem');
+  if (!CATS.includes(b.category)) throw new Error('Mesaj türü geçersiz');
+  const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+  return call('POST', `/api/leads/${id}/mesaj`, {
+    action: b.action, category: b.category, senderName: s(b.senderName, 60), designLink: s(b.designLink, 300), customerReply: s(b.customerReply, 1500),
+    mode: s(b.mode, 20), style: s(b.style, 20), message: s(b.message, 1500), phone: s(b.phone, 30),
+  });
+}
+function deleteLead(id) {
+  if (!ID.test(String(id))) throw new Error('Geçersiz kayıt');
+  return call('DELETE', `/api/leads/${id}`);
+}
+// ---------- Şablonlar ----------
+const templates = () => call('GET', '/api/templates');
+function saveTemplate(t) {
+  const body = { name: String(t.name || '').trim().slice(0, 80), body: String(t.body || '').slice(0, 2000) };
+  if (!body.name || !body.body.trim()) throw new Error('Şablon adı ve metni gerekli');
+  if (t.id) { if (!ID.test(String(t.id))) throw new Error('Geçersiz şablon'); return call('PATCH', `/api/templates/${t.id}`, body); }
+  return call('POST', '/api/templates', body);
+}
+function deleteTemplate(id) {
+  if (!ID.test(String(id))) throw new Error('Geçersiz şablon');
+  return call('DELETE', `/api/templates/${id}`);
+}
+// ---------- Keşif ve kuyruk kontrolü ----------
+function stopCampaign(id) {
+  if (!ID.test(String(id))) throw new Error('Geçersiz keşif');
+  return call('PATCH', `/api/campaigns/${id}`, { action: 'stop' });
+}
+function queueControl(action) {
+  if (!['pause', 'resume', 'stop'].includes(action)) throw new Error('Geçersiz işlem');
+  return call('POST', '/api/outreach/control', { action });
+}
+/** Müşteri listesini Excel olarak döndürür (Buffer) */
+async function exportLeads({ q = '', status: st = '' } = {}) {
+  const base = await server.start();
+  const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  const res = await fetch(`${base}/api/leads/export?q=${encodeURIComponent(String(q).slice(0, 80))}&status=${encodeURIComponent(String(st).slice(0, 30))}`, { headers: { cookie } });
+  if (!res.ok) throw new Error(`Dışa aktarılamadı (HTTP ${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /** Otomatik gönderim kilidini aç / kapat: sunucu yeni ayarla yeniden başlar */
 async function setSending(on) {
   store.patch('settings', { growthSending: !!on });
@@ -154,4 +206,5 @@ async function importData(url) {
   return r;
 }
 
-module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, settings, saveSettings, whatsapp, whatsappAction, importData, setSending, sending: () => !!store.get('settings').growthSending, _jar: () => jar };
+module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, settings, saveSettings, whatsapp, whatsappAction, importData, setSending, message, messageAction, deleteLead, templates, saveTemplate, deleteTemplate, stopCampaign, queueControl, exportLeads,
+  setPin: (t, pin, cur) => server.setPin(t, pin, cur).then(() => { jar = {}; profileName = null; return true; }), sending: () => !!store.get('settings').growthSending, _jar: () => jar };

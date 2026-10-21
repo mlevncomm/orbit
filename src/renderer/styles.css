@@ -771,3 +771,21 @@ button.stat { cursor: pointer; }
 
 
 .wx-qr { width: 240px; height: 240px; border-radius: 16px; background: #fff; padding: 10px; justify-self: start; }
+
+/* Growth OS: profil logoları, PIN, mesaj penceresi */
+.wx-logo { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; margin-bottom: 8px; overflow: hidden;
+  background: var(--pc); color: var(--pa); font-size: 26px; font-weight: 700; box-shadow: 0 14px 28px -14px var(--pc); }
+.wx-logo img { width: 72%; height: 72%; object-fit: contain; }
+.wx-profile[data-wx-pick="tnt_aquails"] .wx-logo { background: #05070c; }
+.wx-profile[data-wx-pick="tnt_aquails"] .wx-logo img { width: 100%; height: 100%; }
+.wx-profile[data-wx-pick="tnt_wexon_dev"] .wx-logo { background: #071311; }
+.wx-lock { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.wx-pin { margin-top: 14px; max-width: 560px; }
+.wx-pin .input { font-size: 20px; letter-spacing: .3em; height: 52px; }
+.wx-modal { width: min(760px, 100%); }
+.wx-modal .modal-head { align-items: flex-start; }
+.wm-drafts { display: grid; gap: 6px; }
+.wm-draft { display: grid; gap: 3px; text-align: left; padding: 10px 12px; border-radius: 14px; background: var(--surface-2); outline: 2px solid transparent; outline-offset: -2px; }
+.wm-draft.on { outline-color: var(--black); }
+.wm-draft span { font-size: 13px; color: var(--muted); }
+.wx-pin .input::placeholder { letter-spacing: normal; font-size: 15px; }

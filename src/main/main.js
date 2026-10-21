@@ -391,7 +391,30 @@ handle('ai:chat', (history) => assistant.chat(history, { emit: send }));
 // ---------- Wexon: Growth OS (arayüz Orbit'te, veri Growth OS sunucusunda) ----------
 handle('growth:status', () => growth.status());
 handle('growth:profiles', () => growth.profiles());
-handle('growth:open', (tenantId) => growth.open(tenantId));
+handle('growth:open', (tenantId, pin) => growth.open(tenantId, pin));
+handle('growth:set-pin', (tenantId, pin, current) => growth.setPin(tenantId, pin, current));
+handle('growth:message', (id) => growth.message(id));
+handle('growth:message-action', (id, body) => growth.messageAction(id, body || {}));
+handle('growth:lead-delete', (id) => growth.deleteLead(id));
+handle('growth:templates', () => growth.templates());
+handle('growth:template-save', (t) => growth.saveTemplate(t || {}));
+handle('growth:template-delete', (id) => growth.deleteTemplate(id));
+handle('growth:campaign-stop', (id) => growth.stopCampaign(id));
+handle('growth:queue-control', (a) => growth.queueControl(a));
+handle('growth:export', async (opts) => {
+  const r = await dialog.showSaveDialog(win, { title: 'Müşterileri Excel olarak kaydet', defaultPath: path.join(app.getPath('documents'), `musteriler-${new Date().toISOString().slice(0, 10)}.xlsx`), filters: [{ name: 'Excel', extensions: ['xlsx'] }] });
+  if (r.canceled || !r.filePath) return null;
+  fs.writeFileSync(r.filePath, await growth.exportLeads(opts || {}));
+  shell.showItemInFolder(r.filePath);
+  return r.filePath;
+});
+// WhatsApp'ı hazır mesajla açar (yalnızca rakamlardan oluşan numara; masaüstü uygulaması yoksa wa.me)
+handle('growth:open-whatsapp', async (digits, text) => {
+  if (!/^\d{8,15}$/.test(String(digits))) throw new Error('Geçersiz WhatsApp numarası');
+  const t = encodeURIComponent(String(text || '').slice(0, 1500));
+  try { await shell.openExternal(`whatsapp://send?phone=${digits}&text=${t}`); return 'app'; }
+  catch { await shell.openExternal(`https://wa.me/${digits}?text=${t}`); return 'web'; }
+});
 handle('growth:settings', () => growth.settings());
 handle('growth:save-settings', (p) => growth.saveSettings(p || {}));
 handle('growth:whatsapp', () => growth.whatsapp());

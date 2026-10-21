@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="katman_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1198 718.8">
+  <!-- Generator: Adobe Illustrator 30.6.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 109)  -->
+  <defs>
+    <style>
+      .st0 { fill: url(#wxMarkGradient); }
+    </style>
+    <linearGradient id="wxMarkGradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1198" y2="0"><stop offset="0" stop-color="#d8f79c"/><stop offset=".5" stop-color="#86de8c"/><stop offset="1" stop-color="#16a567"/></linearGradient>
+  </defs>
+  <path class="st0" d="M237.09,0H0v245.46l473.34,473.34h241.28v-241.28L237.09,0Z"/>
+  <path class="st0" d="M719.64,0h-237.09v245.46l473.33,473.34h241.27v-241.28L719.64,0Z"/>
+  <rect class="st0" x="913.16" width="284.84" height="284.84"/>
+</svg>

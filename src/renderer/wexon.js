@@ -41,7 +41,7 @@ async function wxLoad(tab = W.tab) {
 PAGES.wexon = () => {
   const tabs = [['ozet', 'grid', 'Özet'], ['musteriler', 'users', 'Müşteriler'], ['bul', 'mappin', 'Müşteri Bul'], ['whatsapp', 'message', 'WhatsApp'], ['site', 'globe', 'Site İndirici']];
   const connected = W.status?.connected;
-  const title = { ayarlar: ['Ayarlar ve WhatsApp', 'Growth OS anahtarları, gönderim sınırları ve WhatsApp Web bağlantısı'], ozet: ['Growth OS', 'wexon.dev müşteri ve satış merkezi'], musteriler: ['Müşteriler', 'Growth OS müşteri listesi'], bul: ['Müşteri Bul', 'Google Places ile yeni işletme keşfi'], whatsapp: ['WhatsApp', 'Onay bekleyen satış mesajları'], site: ['Site Klonlayıcı', 'wexon.dev web stüdyosu · bir siteyi birebir kopyala'] }[W.tab] || ['Wexon', ''];
+  const title = { sablonlar: ['Şablonlar', 'Hazır mesajlar'], ayarlar: ['Ayarlar ve WhatsApp', 'Growth OS anahtarları, gönderim sınırları ve WhatsApp Web bağlantısı'], ozet: ['Growth OS', 'wexon.dev müşteri ve satış merkezi'], musteriler: ['Müşteriler', 'Growth OS müşteri listesi'], bul: ['Müşteri Bul', 'Google Places ile yeni işletme keşfi'], whatsapp: ['WhatsApp', 'Onay bekleyen satış mesajları'], site: ['Site Klonlayıcı', 'wexon.dev web stüdyosu · bir siteyi birebir kopyala'] }[W.tab] || ['Wexon', ''];
   const head = `<div class="page-head"><div><h1>${title[0]}</h1><p>${title[1]}</p></div>
     <div class="row">${connected && W.tab !== 'site' ? `<span class="chip"><span class="status-dot done"></span>${h(W.status.profile || 'Profil açık')}</span><button class="btn" data-wx="lock">${I('lock')}Kilitle</button>` : ''}</div></div>`;
 
@@ -53,11 +53,41 @@ PAGES.wexon = () => {
   if (W.tab === 'bul') return head + findView();
   if (W.tab === 'whatsapp') return head + queueView();
   if (W.tab === 'ayarlar') return head + settingsView();
+  if (W.tab === 'sablonlar') return head + templatesView();
   return head;
 };
 
 PAGES.wexonAfter = () => {
   clearInterval(W.timer);
+  const pf = $('#wxPinForm');
+  if (pf) {
+    $('#wxPin').focus();
+    pf.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const pin = $('#wxPin').value.trim();
+      if (!/^\d{4,8}$/.test(pin)) { W.pinErr = 'Şifre 4-8 rakam olmalı'; return renderPage(); }
+      W.busy = true; W.pinErr = '';
+      api.growth.open(W.pick, pin).then((st) => { W.status = st; W.pick = null; W.loaded = {}; toast(`${st.profile} açıldı`); W.busy = false; wxLoad(); })
+        .catch((err) => { W.busy = false; W.pinErr = err.message; W.profiles = null; renderPage(); });
+    });
+  }
+  const pn = $('#wxPinNew');
+  if (pn) pn.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const a = $('#wxPin1').value.trim(), b = $('#wxPin2').value.trim();
+    if (!/^\d{4,8}$/.test(a)) { W.pinErr = 'Şifre 4-8 rakam olmalı'; return renderPage(); }
+    if (a !== b) { W.pinErr = 'Şifreler aynı değil'; return renderPage(); }
+    const t = W.pick;
+    wx(async () => { await api.growth.setPin(t, a); return api.growth.open(t, a); }, (st) => { W.status = st; W.pick = null; W.profiles = null; W.loaded = {}; toast('Şifre belirlendi, profil açıldı'); });
+  });
+  const cp = $('#wxPinChange');
+  if (cp) cp.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(cp).entries());
+    if (!/^\d{4,8}$/.test(f.next)) return toast('Yeni şifre 4-8 rakam olmalı', true);
+    if (f.next !== f.again) return toast('Yeni şifreler aynı değil', true);
+    wx(() => api.growth.setPin(f.tenant, f.next, f.current), () => { W.status = { connected: false }; W.profiles = null; W.loaded = {}; toast('Şifre değişti; profili yeni şifreyle aç'); });
+  });
   const sf2 = $('#wxSettings');
   if (sf2) sf2.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -103,9 +133,11 @@ PAGES.wexonAfter = () => {
   if (!W.loaded?.[W.tab]) { W.loaded = { ...(W.loaded || {}), [W.tab]: true }; wxLoad(); }
 };
 
-function wxOpen(tenantId) {
-  wx(() => api.growth.open(tenantId), async (st) => {
-    W.status = st; W.pick = null; W.loaded = {}; toast(`${st.profile} açıldı`); wxLoad();
+const PROFILE_LOGO = { tnt_wexon_dev: 'brands/wexon.svg', tnt_aquails: 'brands/aquails.png' };
+
+function wxOpen(tenantId, pin) {
+  wx(() => api.growth.open(tenantId, pin), async (st) => {
+    W.status = st; W.pick = null; W.pinErr = ''; W.loaded = {}; toast(`${st.profile} açıldı`); wxLoad();
   });
 }
 
@@ -113,16 +145,28 @@ function loginView() {
   if (!W.profiles && !W.busy) wx(() => api.growth.profiles(), (r) => (W.profiles = r));
   const cards = (W.profiles || []).map((p) => `
     <button class="wx-profile ${W.pick === p.tenantId ? 'on' : ''}" data-wx-pick="${h(p.tenantId)}" style="--pc:${h(p.color)};--pa:${h(p.accent)}">
-      <span class="wx-letter">${h(p.letter)}</span>
+      <span class="wx-logo">${PROFILE_LOGO[p.tenantId] ? `<img src="${PROFILE_LOGO[p.tenantId]}" alt="">` : h(p.letter)}</span>
       <b>${h(p.name)}</b><small>${h(p.desc)}</small>
-      ${p.lockedUntil ? `<span class="badge fw">Kilitli</span>` : ''}
+      <span class="wx-lock">${I('lock', 13)}${p.lockedUntil ? 'Kısa süreliğine kilitli' : p.pinSet ? 'Şifreyle açılır' : 'Şifre belirle'}</span>
     </button>`).join('');
+  const pick = (W.profiles || []).find((p) => p.tenantId === W.pick);
+  const pinBox = !pick ? '' : pick.pinSet
+    ? `<form class="card wx-pin" id="wxPinForm"><h3>${h(pick.name)} · şifre</h3><p class="sub">Profil şifreni yaz (4-8 rakam). Çok sayıda yanlış denemede profil kısa süreliğine kilitlenir.</p>
+        <div class="row" style="flex-wrap:nowrap"><input class="input" id="wxPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••" ${W.busy ? 'disabled' : ''}>
+        <button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>${W.busy ? '<span class="spinner"></span>' : I('lock')}Aç</button></div>
+        ${W.pinErr ? `<p class="sub" style="color:var(--danger);margin-top:8px">${h(W.pinErr)}</p>` : ''}</form>`
+    : `<form class="card wx-pin" id="wxPinNew"><h3>${h(pick.name)} · şifre belirle</h3><p class="sub">Bu profil bundan sonra bu şifreyle açılır. 4-8 rakam; unutma, Orbit şifreyi kendisi göstermez.</p>
+        <div class="row"><input class="input" id="wxPin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Yeni şifre" style="flex:1">
+        <input class="input" id="wxPin2" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Tekrar" style="flex:1">
+        <button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>Belirle ve aç</button></div>
+        ${W.pinErr ? `<p class="sub" style="color:var(--danger);margin-top:8px">${h(W.pinErr)}</p>` : ''}</form>`;
   return `
     <section class="page-banner mesh sky">
       <div><span class="kicker">Growth OS · Orbit'in içinde</span><h2>Profilini seç</h2>
         <p>Müşteri bulma, satış mesajları ve onaylı WhatsApp kuyruğu bu bilgisayarda çalışır; veriler burada saklanır, dışarıda bir sunucuya bağlanılmaz.</p></div>
     </section>
     <div class="wx-profiles">${cards || (W.err ? `<div class="card empty small"><p>${h(W.err)}</p><button class="btn sm" data-wx="retry">${I('refresh')}Tekrar dene</button></div>` : '<div class="card empty small"><span class="spinner"></span></div>')}</div>
+    ${pinBox}
     ${importCard()}`;
 }
 
@@ -167,6 +211,16 @@ function settingsView() {
         <div class="row"><span class="sub">Anahtarlar yalnızca bu bilgisayardaki Growth OS veritabanında tutulur.</span><span class="spacer"></span><button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>Kaydet</button></div>
       </form>
     </div>
+    <form class="card form" id="wxPinChange" style="margin-top:14px">
+      <h3>Profil şifresini değiştir</h3>
+      <div class="row">
+        <select class="input sm" name="tenant">${(W.profiles || [{ tenantId: 'tnt_wexon_dev', name: 'Wexon.dev' }, { tenantId: 'tnt_aquails', name: 'Aquails' }]).map((p) => `<option value="${h(p.tenantId)}">${h(p.name)}</option>`).join('')}</select>
+        <input class="input sm" name="current" type="password" inputmode="numeric" maxlength="8" placeholder="Mevcut şifre" style="max-width:none;flex:1">
+        <input class="input sm" name="next" type="password" inputmode="numeric" maxlength="8" placeholder="Yeni şifre" style="max-width:none;flex:1">
+        <input class="input sm" name="again" type="password" inputmode="numeric" maxlength="8" placeholder="Yeni şifre tekrar" style="max-width:none;flex:1">
+        <button class="btn primary sm" type="submit">Değiştir</button>
+      </div>
+    </form>
     ${importCard()}`;
 }
 
@@ -193,23 +247,25 @@ function overviewView() {
 
 const campRow = (c) => `<div class="rec-item"><span class="status-dot ${c.status === 'done' ? 'done' : c.status === 'error' ? 'error' : ['queued', 'running'].includes(c.status) ? 'running' : ''}"></span>
   <div class="txt"><b>${h(c.query)}</b><p>${h([c.district, c.city].filter(Boolean).join(', '))} · ${h(CAMP[c.status] || c.status)} · ${c.foundCount}/${c.targetCount} bulundu${c.error ? ' · ' + h(c.error) : ''}</p></div>
-  <small class="sub">${new Date(c.createdAt).toLocaleDateString('tr-TR')}</small></div>`;
+  ${['queued', 'running'].includes(c.status) ? `<button class="btn sm" data-wx-stop="${c.id}">${I('stop', 14)}Durdur</button>` : `<small class="sub">${new Date(c.createdAt).toLocaleDateString('tr-TR')}</small>`}</div>`;
 
 function leadsView() {
   const list = W.leads;
   const toolbar = `<div class="toolbar"><label class="search">${I('search')}<input id="wxQ" placeholder="İşletme, telefon, ilçe ara… (Enter)" value="${h(W.q)}"></label>
     <select class="input sm" data-wx-filter style="max-width:180px"><option value="">Tüm durumlar</option>${LEAD_STATUSES.map(([k, n]) => `<option value="${k}" ${W.st === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
-    <button class="btn primary" data-wx="draft" ${W.sel.size && !W.busy ? '' : 'disabled'}>${I('message')}WhatsApp taslağı (${W.sel.size})</button></div>`;
+    <button class="btn" data-wx="export">${I('download')}Excel</button>
+    <button class="btn primary" data-wx="draft" ${W.sel.size && !W.busy ? '' : 'disabled'}>${I('message')}Kuyruğa taslak (${W.sel.size})</button></div>`;
   if (!list) return toolbar + `<div class="card empty"><span class="spinner"></span></div>`;
   if (!list.length) return toolbar + `<div class="card empty small"><p>Sonuç yok.</p></div>`;
-  return toolbar + `<div class="card"><div class="table-wrap"><table class="table wx-leads"><thead><tr><th><input type="checkbox" data-wx-all ${list.every((l) => W.sel.has(l.id)) ? 'checked' : ''}></th><th>İşletme</th><th>Telefon</th><th>Web</th><th>Durum</th><th>Not</th></tr></thead><tbody>
+  return toolbar + `<div class="card"><div class="table-wrap"><table class="table wx-leads"><thead><tr><th><input type="checkbox" data-wx-all ${list.every((l) => W.sel.has(l.id)) ? 'checked' : ''}></th><th>İşletme</th><th>Telefon</th><th>Web</th><th>Durum</th><th>Not</th><th></th></tr></thead><tbody>
     ${list.map((l) => `<tr><td><input type="checkbox" data-wx-sel="${l.id}" ${W.sel.has(l.id) ? 'checked' : ''}></td>
       <td><b>${h(l.name)}</b><br><small class="sub">${h([l.district, l.city].filter(Boolean).join(', '))}${l.rating ? ` · ★ ${l.rating}` : ''}</small></td>
       <td class="mono">${h(l.phone || '—')}</td>
       <td>${l.website ? `<button class="btn sm ghost" data-open="${h(l.website)}">${I('external', 14)}</button>` : '<span class="sub">yok</span>'}</td>
       <td><select class="input sm" data-wx-lead-status="${l.id}">${LEAD_STATUSES.map(([k, n]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
-      <td><input class="input sm wx-note" data-wx-note="${l.id}" value="${h(l.notes || '')}" placeholder="not…" style="max-width:none"></td></tr>`).join('')}
-    </tbody></table></div><p class="sub" style="margin-top:10px">${list.length} müşteri · taslaklar onay kuyruğuna düşer, sen onaylamadan hiçbir mesaj gönderilmez.</p></div>`;
+      <td><input class="input sm wx-note" data-wx-note="${l.id}" value="${h((l.notes || '').split('\n')[0])}" placeholder="not…" style="max-width:none"></td>
+      <td style="white-space:nowrap"><button class="btn primary sm" data-wx-msg="${l.id}">${I('message', 14)}Yaz</button> <button class="btn sm ghost" data-wx-del="${l.id}" title="Sil">${I('trash', 14)}</button></td></tr>`).join('')}
+    </tbody></table></div><p class="sub" style="margin-top:10px">${list.length} müşteri · “Yaz” mesajı WhatsApp'ta hazır açar; “Kuyruğa taslak” onay kuyruğuna ekler, sen onaylamadan hiçbir mesaj gönderilmez.</p></div>`;
 }
 
 function findView() {
@@ -241,7 +297,9 @@ function queueView() {
     <section class="page-banner mesh lilac">
       <div><span class="kicker">WhatsApp onay kuyruğu</span><h2>${jobs.length ? `${jobs.length} mesaj onayını bekliyor` : 'Onay bekleyen mesaj yok'}</h2>
         <p><span class="status-dot ${state[0]}"></span> ${h(state[1])} · günlük sınır ${q.dailyCap ?? '—'} · mesajlar arası ${q.delayMinSec ?? '?'}-${q.delayMaxSec ?? '?'} sn. Onaylanan mesajlar sırayla gönderilir.</p>
-        ${jobs.length > 1 ? `<div class="row"><button class="btn primary" data-wx="approve-all" ${W.busy ? 'disabled' : ''}>${I('check')}Hepsini onayla (${jobs.length})</button></div>` : ''}</div>
+        <div class="row">${jobs.length > 1 ? `<button class="btn primary" data-wx="approve-all" ${W.busy ? 'disabled' : ''}>${I('check')}Hepsini onayla (${jobs.length})</button>` : ''}
+          ${q.paused || q.stopped ? `<button class="btn" data-wx-q="resume">${I('zap')}Sürdür</button>` : `<button class="btn" data-wx-q="pause">Duraklat</button>`}
+          ${q.stopped ? '' : `<button class="btn" data-wx-q="stop">${I('stop')}Durdur</button>`}</div></div>
       <div class="banner-stats">${[[q.pending ?? jobs.length, 'onay bekliyor'], [q.queued ?? 0, 'gönderim sırasında'], [q.sentToday ?? 0, 'bugün gönderildi'], [q.failed ?? 0, 'başarısız']].map(([n, l]) => `<div class="stat glass"><b>${n}</b><span>${l}</span></div>`).join('')}</div>
     </section>
     <div class="stack" style="margin-top:0">${jobs.map((j) => `
@@ -300,14 +358,19 @@ function siteView() {
 }
 
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-wx],[data-wx-tab],[data-wx-pick],[data-wx-status],[data-wx-job],[data-wx-sel],[data-wx-all],[data-site-open]');
+  const t = e.target.closest('[data-wx],[data-wx-tab],[data-wx-pick],[data-wx-status],[data-wx-job],[data-wx-sel],[data-wx-all],[data-site-open],[data-wx-stop],[data-wx-q]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.wxTab) { const sec = SECTIONS.find((s) => s.id === 'wexon'); const it = sec.items.find((i) => i.on && (wxTab(d.wxTab), i.on())); return it ? goSub(it) : (renderPage(), wxLoad()); }
-  if (d.wxPick) { W.err = ''; return wxOpen(d.wxPick); }
+  if (d.wxPick) { W.pick = W.pick === d.wxPick ? null : d.wxPick; W.pinErr = ''; renderPage(); return $('#wxPin, #wxPin1')?.focus(); }
   if (d.wxStatus) { W.tab = 'musteriler'; W.st = d.wxStatus; W.leads = null; renderPage(); return wxLoad('musteriler'); }
   if (d.wxSel) { W.sel.has(d.wxSel) ? W.sel.delete(d.wxSel) : W.sel.add(d.wxSel); return renderPage(); }
   if (d.wxAll !== undefined) { const all = (W.leads || []).every((l) => W.sel.has(l.id)); (W.leads || []).forEach((l) => (all ? W.sel.delete(l.id) : W.sel.add(l.id))); return renderPage(); }
+  if (d.wxStop) { if (!confirm('Bu keşif durdurulsun mu? Bulunanlar listede kalır.')) return; return wx(() => api.growth.stopCampaign(d.wxStop), () => { toast('Keşif durduruldu'); wxLoad('bul'); }); }
+  if (d.wxQ) {
+    if (d.wxQ === 'stop' && !confirm('Gönderim kuyruğu durdurulsun mu? Sırada bekleyenler gönderilmez.')) return;
+    return wx(() => api.growth.queueControl(d.wxQ), () => { toast({ pause: 'Kuyruk duraklatıldı', resume: 'Kuyruk sürüyor', stop: 'Kuyruk durduruldu' }[d.wxQ]); wxLoad('whatsapp'); });
+  }
   if (d.siteOpen) { try { await api.site.open(d.siteOpen, d.what); } catch (err) { toast(err.message, true); } return; }
   if (d.wxJob) {
     const job = (W.queue?.pendingJobs || []).find((j) => j.id === d.id);
@@ -320,6 +383,7 @@ document.addEventListener('click', async (e) => {
   switch (d.wx) {
     case 'lock': return wx(() => api.growth.lock(), (st) => { W.status = st; W.overview = W.leads = W.queue = W.campaigns = null; W.profiles = null; W.loaded = {}; toast('Growth OS kilitlendi'); });
     case 'retry': W.err = ''; W.profiles = null; return renderPage();
+    case 'export': return wx(() => api.growth.exportLeads({ q: W.q, status: W.st }), (f) => f && toast('Excel kaydedildi'));
     case 'wa-on': return wx(() => api.growth.whatsappAction('connect'), (r) => { W.wa = r; });
     case 'wa-off':
       if (!confirm('WhatsApp Web bağlantısı kesilsin mi? Yeniden bağlamak için QR okutman gerekir.')) return;
