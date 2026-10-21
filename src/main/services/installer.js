@@ -22,7 +22,7 @@ const store = require('./store');
 const log = require('./log');
 
 const ACTIVE = new Set(['queued', 'running']);
-const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade', 'amdKind', 'wingetSource'];
+const PLAIN = ['key', 'name', 'source', 'wingetId', 'url', 'args', 'npmPkg', 'ids', 'color', 'upgrade', 'amdKind', 'wingetSource', 'reinstall'];
 
 class Installer extends EventEmitter {
   constructor() {
@@ -39,6 +39,7 @@ class Installer extends EventEmitter {
       key: item.key, name: item.name, status: item.status, phase: item.phase || null,
       percent: item.percent ?? null, message: item.message || '', version: item.version || null,
       error: item.error || null, verified: item.verified ?? null, color: item.color,
+      needsReinstall: Boolean(item.needsReinstall),
     };
   }
 
@@ -75,7 +76,7 @@ class Installer extends EventEmitter {
       if (it.source === 'npm' && !U.safeNpmName(it.npmPkg)) { this.emit('progress', { key: it.key, name: it.name, status: 'error', message: 'Geçersiz npm paket adı' }); continue; }
       // Aynı anahtarlı eski (bitmiş) kaydı kuyruktan kaldır
       this.queue = this.queue.filter((q) => q.key !== it.key);
-      const item = { ...it, status: 'queued', phase: null, percent: null, message: 'Sırada', error: null, verified: null, version: null };
+      const item = { ...it, status: 'queued', phase: null, percent: null, message: 'Sırada', error: null, verified: null, version: null, needsReinstall: false };
       this.queue.push(item);
       activeKeys.add(it.key);
       if (it.wingetId) activeIds.add(it.wingetId.toLowerCase());
@@ -98,6 +99,16 @@ class Installer extends EventEmitter {
     const q = this.queue.find((x) => x.key === key && ['error', 'cancelled', 'warn'].includes(x.status));
     if (!q) return false;
     return this.enqueue([q]) > 0;
+  }
+
+  /**
+   * Üstüne güncellenemeyen paketi (kurulum türü değişmiş) kaldırıp yeniden kurar. Program kaldırma gerçek bir
+   * sistem değişikliği olduğundan yalnızca arayüzde kullanıcı onayladıktan sonra çağrılır.
+   */
+  reinstall(key) {
+    const q = this.queue.find((x) => x.key === key && x.status === 'error' && x.needsReinstall);
+    if (!q || q.source !== 'winget') return false;
+    return this.enqueue([{ ...q, reinstall: true }]) > 0;
   }
 
   cancel() {
@@ -164,6 +175,18 @@ class Installer extends EventEmitter {
     this.emitItem(item, { phase, percent: null, message: 'Paket bilgisi alınıyor…' });
     // winget, çıktısı yönlendirildiğinde indirme ilerlemesi YAZMIYOR (doğrulandı). Gerçek ilerleme için
     // kurulum dosyasının boyutu resmi adresinden alınır ve winget'in geçici klasöründeki dosya izlenir.
+    if (item.reinstall) {
+      // Kullanıcı onayladı: önce winget ile eski sürüm kaldırılır (kaldırma başarısızsa kurulum denenmez)
+      this.emitItem(item, { phase: 'install', percent: null, message: 'Eski sürüm kaldırılıyor…' });
+      const un = await runProcess('winget', ['uninstall', '--id', item.wingetId, '-e', '--silent', '--disable-interactivity', '--accept-source-agreements'], { onSpawn: (c) => (this.child = c) });
+      const ux = U.explainExit(un.code);
+      if (ux.kind === 'error') {
+        log.warn(`winget ${item.wingetId} kaldırma çıkış ${U.hex(un.code)}`);
+        return { status: 'error', message: `Eski sürüm kaldırılamadı (${U.hex(un.code)}); program olduğu gibi bırakıldı`, error: `Kaldırma başarısız · ${U.hex(un.code)}` };
+      }
+      log.info(`${item.wingetId}: eski sürüm kaldırıldı, yeni sürüm kuruluyor`);
+      item.reinstall = false;
+    }
     const meta = src === 'winget' ? await resolveInstaller(item.wingetId).catch(() => null) : null;
     const stopWatch = meta ? watchDownload(item.wingetId, meta, (bytes) => {
       if (phase !== 'download' || !bytes) return;
@@ -199,6 +222,11 @@ class Installer extends EventEmitter {
       tail.push(...u.output.split(/\r?\n/).slice(-6));
       ex = u.code == null ? { kind: 'error', text: u.error || 'Kullanıcı olarak çalıştırılamadı' } : U.explainExit(u.code);
       if (ex.kind === 'needs-user') ex = { kind: 'error', text: 'Yükleyici kullanıcı bağlamında da çalışmadı' };
+    }
+    if (ex.kind === 'reinstall') {
+      item.needsReinstall = true;
+      log.warn(`winget ${item.wingetId} çıkış ${U.hex(r.code)}: kurulum türü değişmiş, kaldırıp yeniden kurma onayı bekleniyor`);
+      return { status: 'error', message: ex.text, error: `${ex.text} · ${U.hex(r.code)}` };
     }
     if (ex.kind === 'error') {
       log.warn(`winget ${item.wingetId} çıkış ${U.hex(r.code)}: ${tail.join(' | ')}`);

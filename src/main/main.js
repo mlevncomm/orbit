@@ -269,6 +269,7 @@ handle('install:cancel', () => installer.cancel());
 handle('install:list', () => installer.list());
 handle('install:skip', (key) => installer.skip(key));
 handle('install:retry', (key) => installer.retry(key));
+handle('install:reinstall', (key) => installer.reinstall(key));
 handle('install:pending', () => installer.pendingFromLastRun());
 handle('install:resume', () => installer.resumePending());
 handle('install:discard', () => installer.discardPending());

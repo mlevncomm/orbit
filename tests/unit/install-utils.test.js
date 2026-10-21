@@ -5,6 +5,7 @@ const U = require('../../src/main/services/install-utils');
 test('explainExit: winget ve MSI kodları', () => {
   assert.equal(U.explainExit(0).kind, 'ok');
   assert.equal(U.explainExit(-1978335189).kind, 'already');   // 0x8A15002B
+  assert.equal(U.explainExit(-1978335090).kind, 'reinstall');   // 0x8A15008E
   assert.equal(U.explainExit(-1978335135).kind, 'already');   // 0x8A150061
   assert.equal(U.explainExit(-1978334967).kind, 'reboot');    // 0x8A150109
   assert.equal(U.explainExit(3010).kind, 'reboot');

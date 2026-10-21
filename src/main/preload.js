@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('orbit', {
     list: () => call('install:list'),
     skip: (key) => call('install:skip', key),
     retry: (key) => call('install:retry', key),
+    reinstall: (key) => call('install:reinstall', key),
     pending: () => call('install:pending'),
     resume: () => call('install:resume'),
     discard: () => call('install:discard'),

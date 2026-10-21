@@ -8,6 +8,7 @@ const CODES = {
   '0x8A150061': { kind: 'already', text: 'Zaten kurulu' },
   '0x8A150056': { kind: 'needs-user', text: 'Yükleyici yönetici yetkisiyle çalışmayı reddetti (ör. Spotify); normal kullanıcı olarak denenmeli' },
   '0x8A150109': { kind: 'reboot', text: 'Kuruldu, tamamlanması için yeniden başlatma gerekli' },
+  '0x8A15008E': { kind: 'reinstall', text: 'Yeni sürüm farklı bir kurulum türünde; üstüne güncellenemez. Eski sürüm kaldırılıp yeniden kurulmalı' },
   '0x8A150014': { kind: 'error', text: 'Paket winget deposunda bulunamadı (kimlik değişmiş olabilir)' },
   '0x8A150008': { kind: 'error', text: 'Kurulum dosyası indirilemedi (internet bağlantısını kontrol et)' },
   '0x8A150011': { kind: 'error', text: 'İndirilen dosyanın imza/karma doğrulaması tutmadı; güvenlik için kurulmadı' },

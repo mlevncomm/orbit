@@ -568,7 +568,10 @@ PAGES.apps = () => {
         <div class="rec-list">${ups.map((u) => {
           const job = S.jobs.get('upg_' + u.id);
           return `<div class="rec-item">${appIcon({ name: u.name, color: colorFor(u.name) })}<div class="txt"><b>${h(u.name)}</b><p><code>${h(shortVer(u.version))}</code> → <code class="new">${h(shortVer(u.available))}</code> · <span class="mono">${h(u.id)}</span></p></div>
-            <button class="btn primary sm" data-upgrade="${h(u.id)}" data-upgrade-name="${h(u.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job) + (job.status === 'running' ? ' %' + job.percent : '')) : 'Güncelle'}</button></div>`;
+            ${job?.needsReinstall
+              ? `<button class="btn sm" data-job-reinstall="${h(job.key)}" title="${h(job.message)}">${I('refresh')}Kaldırıp yeniden kur</button>`
+              : `<button class="btn primary sm" data-upgrade="${h(u.id)}" data-upgrade-name="${h(u.name)}" ${job && ['queued', 'running'].includes(job.status) ? 'disabled' : ''}>${I('download')}${job ? h(statusLabel(job) + (job.status === 'running' ? ' %' + job.percent : '')) : 'Güncelle'}</button>`}</div>
+            ${job?.needsReinstall ? `<p class="sub" style="margin:-4px 0 6px 58px;font-size:12.5px">${h(job.message)}</p>` : ''}`;
         }).join('')}</div></div>`);
   }
 
@@ -760,7 +763,8 @@ function renderFeed() {
             ? '<div class="bar indet"><i></i></div>'
             : `<div class="bar"><i style="width:${['done', 'skipped', 'error', 'warn'].includes(j.status) ? 100 : j.percent || 0}%"></i></div>`}
           <small title="${h(j.error || j.message || '')}">${h(statusLabel(j))}${j.message ? ' · ' + h(j.message) : ''}</small>
-          ${['error', 'warn', 'cancelled'].includes(j.status) ? `<div class="job-actions"><button data-job-retry="${h(j.key)}">${I('refresh', 12)}Yeniden dene</button></div>` : ''}
+          ${j.needsReinstall ? `<div class="job-actions"><button data-job-reinstall="${h(j.key)}">${I('refresh', 12)}Kaldırıp yeniden kur</button></div>`
+            : ['error', 'warn', 'cancelled'].includes(j.status) ? `<div class="job-actions"><button data-job-retry="${h(j.key)}">${I('refresh', 12)}Yeniden dene</button></div>` : ''}
           ${j.status === 'queued' ? `<div class="job-actions"><button data-job-skip="${h(j.key)}">${I('x', 12)}Atla</button></div>` : ''}</div></div></div>`;
       }
       const me = f.type === 'me';
@@ -919,7 +923,7 @@ function closeOverlays() {
 
 /* ---------- Olaylar ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-section],[data-sub],[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-asst-tab],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-skip],[data-repair],[data-profile]');
+  const t = e.target.closest('[data-section],[data-sub],[data-nav],[data-action],[data-toggle],[data-remove],[data-cat],[data-opt],[data-theme-set],[data-install-rec],[data-install-amd],[data-asst-tab],[data-open],[data-wu],[data-wu-all],[data-suggest],[data-proposal],[data-dash-tab],[data-engine],[data-apps-view],[data-upgrade],[data-job-retry],[data-job-reinstall],[data-job-skip],[data-repair],[data-profile]');
   if (!t) return;
   const d = t.dataset;
 
@@ -941,6 +945,13 @@ document.addEventListener('click', async (e) => {
   if (d.dashTab) { S.dashTab = d.dashTab; saveUi({ dashTab: d.dashTab }); return renderPage(); }
   if (d.opt) { S.opts[d.opt] = !S.opts[d.opt]; saveUi({ opts: { ...S.opts } }); return renderPage(); }
   if (d.engine) { await saveSetting({ rgbEngine: d.engine }); return renderPage(); }
+  if (d.jobReinstall) {
+    const j = S.jobs.get(d.jobReinstall) || {};
+    if (!confirm(`${j.name || 'Bu program'} yeni sürümü farklı bir kurulum türünde, üstüne güncellenemiyor.
+
+Eski sürüm kaldırılıp yenisi kurulsun mu? Ayarları genelde korunur; kaldırma başarısız olursa program olduğu gibi bırakılır.`)) return;
+    const ok = await safe(() => api.install.reinstall(d.jobReinstall)); if (!ok) toast('Yeniden kurulum başlatılamadı'); return;
+  }
   if (d.jobRetry) { const ok = await safe(() => api.install.retry(d.jobRetry)); if (!ok) toast('Yeniden denenemedi'); return; }
   if (d.jobSkip) { await safe(() => api.install.skip(d.jobSkip)); return; }
   if (d.repair) return runRepair(d.repair);
@@ -1092,6 +1103,7 @@ async function loadInstalled(force = false) {
   S.catalog = await api.catalog.get();
   S.installedLoaded = true;
   if (S.page !== 'assistant' && S.page !== 'lights') renderPage();
+  renderChrome(); // alt menü rozetleri (Güncellemeler sayısı) da yenilensin
   loadFileIcons();
 }
 async function loadDrivers(force = false) {

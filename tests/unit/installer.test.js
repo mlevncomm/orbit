@@ -71,3 +71,20 @@ test('yarım kalan kuyruk diskten okunur ve devam ettirilebilir', async () => {
   assert.equal(installer.list().find((x) => x.key === 'vlc').status, 'done');
   assert.deepEqual(store.get('installQueue'), []);
 });
+
+test('kurulum türü değişen paket: onaysız kaldırılmaz, yalnızca reinstall() ile kaldır-kur sırasına girer', async () => {
+  let seen = null;
+  installer.installOne = async (item) => { await done(); if (item.reinstall) { seen = item.reinstall; return { status: 'done', message: 'ok' }; } item.needsReinstall = true; return { status: 'error', message: 'tür değişti' }; };
+  installer.verify = async (item, res) => res;
+  installer.enqueue([{ key: 'r', name: 'R', source: 'winget', wingetId: 'R.R' }]);
+  await waitIdle();
+  const j = installer.list().find((x) => x.key === 'r');
+  assert.equal(j.status, 'error');
+  assert.equal(j.needsReinstall, true);
+  assert.equal(installer.reinstall('yok'), false);
+  assert.equal(installer.reinstall('r'), true);
+  await waitIdle();
+  assert.equal(seen, true);
+  assert.equal(installer.list().find((x) => x.key === 'r').status, 'done');
+  assert.equal(installer.reinstall('r'), false); // başarılı iş yeniden kaldırılamaz
+});
