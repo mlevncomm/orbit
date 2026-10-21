@@ -40,6 +40,13 @@ const SECTIONS = [
     { label: 'WhatsApp', icon: 'message', page: 'wexon', set: () => wxTab('whatsapp'), on: () => W.tab === 'whatsapp', badge: () => W.overview?.pending || W.queue?.pendingJobs?.length, hot: true },
     { group: 'Web stüdyosu', label: 'Site Klonlayıcı', icon: 'globe', page: 'wexon', set: () => wxTab('site'), on: () => W.tab === 'site' },
   ] },
+  { id: 'projeler', label: 'Projeler', icon: 'code', items: [
+    { group: 'wexon.dev', label: 'Tüm projeler', icon: 'code', page: 'projects', set: () => (P.view = 'all'), on: () => P.view === 'all', badge: () => P.data?.projects.length },
+    { label: 'Dikkat gerekenler', icon: 'alert', page: 'projects', set: () => (P.view = 'issues'), on: () => P.view === 'issues', badge: () => P.data && projIssues().length, hot: true },
+    { label: 'Canlı siteler', icon: 'globe', page: 'projects', set: () => (P.view = 'live'), on: () => P.view === 'live' },
+    { label: 'Bu bilgisayarda', icon: 'folder', page: 'projects', set: () => (P.view = 'local'), on: () => P.view === 'local' },
+    { label: 'Vercel', icon: 'zap', page: 'projects', set: () => (P.view = 'vercel'), on: () => P.view === 'vercel' },
+  ] },
   { id: 'asistan', label: 'Asistan', icon: 'sparkles', items: [
     { label: 'Sohbet', icon: 'sparkles', page: 'assistant', set: () => (S.asstTab = 'chat'), on: () => S.asstTab !== 'memory' },
     { label: 'Hafıza', icon: 'star', page: 'assistant', set: () => (S.asstTab = 'memory'), on: () => S.asstTab === 'memory', badge: () => M?.state?.items.length },
@@ -674,6 +681,10 @@ PAGES.settings = () => {
           <div class="row"><input class="input" id="setKey" type="password" autocomplete="off" placeholder="${s.hasApiKey ? '•••••••••••• kayıtlı' : 'sk-ant-…  (yapıştırınca otomatik kaydedilir)'}" style="flex:1">
           ${s.hasApiKey ? `<button class="btn" data-action="clear-key">${I('trash')}Sil</button>` : ''}</div>
           <small>${s.hasApiKey ? '✓ Anahtar kayıtlı. ' : ''}Windows hesabınla şifrelenerek yalnızca bu bilgisayarda saklanır.</small></div>
+        <div class="field"><label>Vercel token</label>
+          <div class="row"><input class="input" id="setVercel" type="password" autocomplete="off" placeholder="${S.hasVercel ? '•••••••••••• kayıtlı' : 'Vercel > Account Settings > Tokens (yapıştırınca kaydedilir)'}" style="flex:1">
+          ${S.hasVercel ? `<button class="btn" data-action="clear-vercel">${I('trash')}Sil</button>` : ''}</div>
+          <small>Projeler bölümünde Vercel projeleri ve son dağıtımlar için. Windows hesabınla şifreli saklanır.</small></div>
         <div class="field"><label>Ollama modeli / adresi</label><div class="row"><input class="input" data-auto="ollamaModel" value="${h(s.ollamaModel)}" style="flex:1"><input class="input" data-auto="ollamaUrl" value="${h(s.ollamaUrl)}" style="flex:1.4"></div></div>
       </div>
     </div>
@@ -700,6 +711,11 @@ PAGES.settings = () => {
     </div></div>`;
 };
 PAGES.settingsAfter = () => {
+  if (S.hasVercel === undefined) api.projects.hasVercel().then((v) => { S.hasVercel = v; if (S.page === 'settings') renderPage(); });
+  const vt = $('#setVercel');
+  if (vt) vt.addEventListener('change', async () => {
+    try { await api.projects.vercelToken(vt.value); S.hasVercel = !!vt.value.trim(); if (window.P) P.data = null; toast('Vercel token kaydedildi'); renderPage(); } catch (e) { toast(e.message, true); }
+  });
   // Metin alanları yazmayı bırakınca, seçimler anında kaydedilir
   document.querySelectorAll('[data-auto]').forEach((el) => {
     const commit = () => saveSetting({ [el.dataset.auto]: el.value.trim() });
@@ -1013,6 +1029,7 @@ document.addEventListener('click', async (e) => {
     case 'open-logs': return safe(() => api.app.openLogs());
     case 'copy-mcp': try { await navigator.clipboard.writeText(S.bridgeInfo.command); toast('Komut kopyalandı'); } catch { toast('Kopyalanamadı', true); } return;
     case 'boot-check': return runBootCheck();
+    case 'clear-vercel': await api.projects.vercelToken(''); S.hasVercel = false; if (window.P) P.data = null; toast('Vercel token silindi'); return renderPage();
     case 'boot-toggle': S.bootOpen = !S.bootOpen; return renderPage();
     case 'resume-queue': {
       const items = S.pendingQueue || []; S.pendingQueue = [];

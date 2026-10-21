@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('orbit', {
     draft: (ids) => call('growth:draft', ids),
     moderate: (ids, action, message) => call('growth:moderate', ids, action, message),
   },
+  projects: {
+    list: (force) => call('projects:list', force),
+    clone: (name) => call('projects:clone', name),
+    pull: (name) => call('projects:pull', name),
+    code: (name) => call('projects:code', name),
+    folder: (name) => call('projects:folder', name),
+    vercelToken: (token) => call('projects:vercel-token', token),
+    hasVercel: () => call('projects:has-vercel'),
+  },
   site: {
     start: (url, opts) => call('site:start', url, opts),
     cancel: () => call('site:cancel'),

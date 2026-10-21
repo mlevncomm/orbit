@@ -13,6 +13,7 @@ const assistant = require('./ai/assistant');
 const rgb = require('./services/rgb');
 const memory = require('./services/memory');
 const growth = require('./services/growth');
+const projects = require('./services/projects');
 const siteDl = require('./services/site-downloader');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
@@ -42,7 +43,7 @@ async function autoConnectEsp32() {
     autoConnectEsp32.lastError = e.message;
   } finally { esp32AutoBusy = false; }
 }
-const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'wexon', 'assistant', 'settings'];
+const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'wexon', 'projects', 'assistant', 'settings'];
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -401,6 +402,15 @@ handle('growth:campaign', (o) => growth.startCampaign(o || {}));
 handle('growth:queue', () => growth.queue());
 handle('growth:draft', (ids) => growth.draft(ids));
 handle('growth:moderate', (ids, action, message) => growth.moderate(ids, action, message));
+
+// ---------- Projeler (GitHub + canlı siteler + yerel klonlar + Vercel) ----------
+handle('projects:list', (force) => projects.list(!!force));
+handle('projects:clone', (name) => projects.clone(name));
+handle('projects:pull', (name) => projects.pull(name));
+handle('projects:code', (name) => projects.openCode(name));
+handle('projects:folder', (name) => shell.openPath(projects.known(name)));
+handle('projects:vercel-token', (token) => projects.setVercelToken(token));
+handle('projects:has-vercel', () => projects.hasVercel());
 
 // ---------- Wexon: Site İndirici ----------
 const SITES_ROOT = () => path.join(app.getPath('documents'), 'Orbit Siteler');
