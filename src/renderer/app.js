@@ -1124,7 +1124,7 @@ async function init() {
   if (ui.dashTab) S.dashTab = ui.dashTab;
   if (ui.asstTab) S.asstTab = ui.asstTab;
   if (ui.opts) S.opts = { ...S.opts, ...ui.opts };
-  if (ui.page && ui.page !== 'assistant') S.page = ui.page;
+  if (ui.page && ui.page !== 'assistant' && typeof PAGES[ui.page] === 'function') S.page = ui.page; // kaldırılmış sayfa (ör. eski "projects") sessizce yok sayılır
   if (ui.appsView) S.appsView = ui.appsView;
   S.chat = await api.chat.get().catch(() => []);
   document.documentElement.dataset.theme = S.settings.theme;

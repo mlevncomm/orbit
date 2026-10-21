@@ -21,6 +21,8 @@ const SENSITIVE = [
   /sk-ant-[\w-]{10,}/i, /\bsk-[A-Za-z0-9]{20,}/, /\bAIza[0-9A-Za-z_-]{20,}/, /\bgh[pousr]_[A-Za-z0-9]{20,}/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/, /\bTR\d{2}[ ]?(\d{4}[ ]?){5}\d{2}\b/i, /\b(?:\d[ -]?){13,19}\b/,
   /(şifre|parola|password|passwd|pin kodu|api[_ -]?key|secret|token)\s*[:=]\s*\S+/i,
+  // "şifrem 12345", "parolası abc123", "pinim 4321" gibi iki nokta olmadan yazılanlar
+  /(?<![a-zçğıöşü])(şifre\S*|parola\S*|password|passwd|pin(?:im|i|in)?|api[_ -]?key|secret|token)\s+(?:(?:şu|is|olarak)\s+)?\S*\d\S*/i,
 ];
 const isSensitive = (t) => SENSITIVE.some((re) => re.test(t));
 

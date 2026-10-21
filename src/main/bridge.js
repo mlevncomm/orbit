@@ -100,7 +100,12 @@ class Bridge {
       }
       case 'GET /drivers': return this.json(res, 200, { installed: await d.drivers.installedDrivers(url.searchParams.get('refresh') === '1') });
       case 'GET /rgb': return this.json(res, 200, d.rgb.status());
-      case 'GET /esp32': return this.json(res, 200, { ...d.hub.status(), wifi: d.automation.wifi || null, history: d.automation.history.slice(0, 20) });
+      case 'GET /esp32': {
+        // Kalp atışları yanıtı şişirmesin: yalnızca son 20 anlamlı satır
+        const st = d.hub.status();
+        const logs = (st.logs || []).filter((l) => !/"t":"HEARTBEAT"/.test(l.text)).slice(-20);
+        return this.json(res, 200, { ...st, logs, wifi: d.automation.wifi || null, history: d.automation.history.slice(0, 20) });
+      }
       case 'GET /actions': return this.json(res, 200, d.automation.catalog());
       case 'POST /actions': {
         const b = await this.body(req);

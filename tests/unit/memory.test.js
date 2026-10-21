@@ -8,11 +8,12 @@ const memory = require('../../src/main/services/memory');
 test('hassas bilgiler hafızaya hiç yazılmaz', () => {
   for (const t of [
     'Claude anahtarım sk-ant-api03-abcdefghijklmnop', 'şifre: Gizli123!', 'Kartım 4111 1111 1111 1111',
-    'IBAN TR33 0006 1005 1978 6457 8413 26', 'token=ghp_abcdefghijklmnopqrstuvwxyz123456',
+    'IBAN TR33 0006 1005 1978 6457 8413 26', 'token=ghp_abcdefghijklmnopqrstuvwxyz123456', 'şifrem 12345', 'pinim 4321',
   ]) assert.equal(memory.remember(t, { source: 'elle' }), null, t);
   assert.equal(memory.list().length, 0);
   // sürüm numarası, telefon gibi normal bilgiler kart sanılmaz
   assert.ok(memory.remember('Ekran kartı sürücüsü 32.0.21045.11001', { cat: 'bilgisayar', source: 'elle' }));
+  assert.ok(memory.remember('PIN ile açılan profiller; şifreyi sonra değiştireceğim', { source: 'elle' }));
 });
 
 test('anahtarlı bilgi güncellenir, aynı metin tekrarlanmaz, şifreli dosyaya yazılır', () => {
