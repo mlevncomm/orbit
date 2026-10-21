@@ -59,3 +59,4 @@ next-env.d.ts
 
 # Veritabanı yedekleri (gizli bilgi içerir)
 yedekler/
+.prisma-pg/

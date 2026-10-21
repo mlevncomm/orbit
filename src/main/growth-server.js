@@ -5,7 +5,9 @@
 // - Oturum sırrı (AUTH_SECRET) Orbit tarafından üretilir, Windows hesabıyla şifreli saklanır.
 // - Profil şifrelerini (PIN) kullanıcı belirler; yalnızca scrypt özeti saklanır (şifreli). Doğrulamayı ve
 //   yanlış denemede kilitlemeyi Growth OS sunucusu kendisi yapar.
-// - Eski (Vercel / Supabase) Growth OS'a hiçbir bağ yoktur; veriler isteğe bağlı, bir kerelik taşınır.
+// - Canlı mod (isteğe bağlı): veritabanı yerel dosya yerine Supabase (PostgreSQL) olur; orbit.wexon.dev ile aynı
+//   veriyi kullanır. Bağlantı adresi Windows hesabıyla şifreli saklanır, hiçbir yere yazılmaz / loglanmaz.
+//   Geçişte yerel veri Supabase'e (birincil anahtara göre, yerel kazanır), dönüşte Supabase verisi yerele kopyalanır.
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
@@ -88,7 +90,76 @@ function ensureDb() {
   }
 }
 
-function env(p, s) {
+// ---------- Canlı veritabanı (Supabase) ----------
+const PG_URL = /^postgres(ql)?:\/\/[^\s]+$/i;
+function liveUrl() {
+  const v = store.get('growthLive');
+  if (!v) return null;
+  try { return dec(v); } catch { return null; }
+}
+const isLive = () => Boolean(liveUrl());
+const redact = (t) => String(t || '').replace(/postgres(ql)?:\/\/\S+/gi, '[adres]');
+/** Veri aktarım alt sürecini (growth-import / growth-export) çalıştırır; adres stdin ile verilir */
+function runChild(script, databaseUrl) {
+  const s = secrets();
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(__dirname, script)], {
+      cwd: ROOT(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...env(0, s, { local: true }), ORBIT_PG: require.resolve('pg'), GROWTH_ROOT: ROOT() },
+    });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    child.on('exit', (code) => {
+      const last = out.trim().split(/\r?\n/).pop() || '{}';
+      try { resolve({ code, ...JSON.parse(last) }); } catch { resolve({ code, error: (err || out).slice(-400) }); }
+    });
+    child.stdin.end(String(databaseUrl).trim()); // adres ortam değişkeni değil stdin ile verilir
+  });
+}
+/** Canlıya geç: yerel veri Supabase'e yazılır, sonra sunucu Supabase ile açılır */
+async function goLive(databaseUrl) {
+  const u = String(databaseUrl || '').trim();
+  if (!PG_URL.test(u)) throw new Error('Geçerli bir PostgreSQL bağlantı adresi girin (postgresql://…)');
+  if (/\[YOUR-PASSWORD\]/i.test(u)) throw new Error('Adresteki [YOUR-PASSWORD] yerine veritabanı şifreni yaz');
+  stop();
+  ensureDb();
+  const r = await runChild('growth-export.js', u);
+  if (r.code !== 0 || r.error) {
+    log.warn('Growth OS canlıya geçiş başarısız: ' + redact(r.error).slice(0, 300));
+    await start().catch(() => {});
+    throw new Error('Canlıya geçilemedi: ' + redact(r.error || 'bilinmeyen hata').slice(0, 200));
+  }
+  store.set('growthLive', enc(u));
+  log.info('Growth OS canlı veritabanına geçti (Supabase), yerelden gönderilen: ' + JSON.stringify(r.counts));
+  await start();
+  return { counts: r.counts };
+}
+/** Yerele dön: Supabase'deki güncel veri yerel dosyaya kopyalanır (önce yedek alınır), sonra sunucu yerelde açılır */
+async function goLocal() {
+  const u = liveUrl();
+  if (!u) return { counts: null };
+  stop();
+  ensureDb();
+  const backup = DB() + '.' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.bak';
+  fs.copyFileSync(DB(), backup);
+  const r = await runChild('growth-import.js', u);
+  if (r.code !== 0 || r.error) {
+    fs.copyFileSync(backup, DB());
+    log.warn('Growth OS yerele dönüş başarısız, canlı modda kalındı: ' + redact(r.error).slice(0, 300));
+    await start().catch(() => {});
+    throw new Error('Yerele dönülemedi (canlı modda kalındı): ' + redact(r.error || 'bilinmeyen hata').slice(0, 200));
+  }
+  store.set('growthLive', null);
+  log.info("Growth OS yerel veritabanına döndü, Supabase'den alınan: " + JSON.stringify(r.counts));
+  await start();
+  return { counts: r.counts, backup };
+}
+/** Web sürümünün (Vercel) PROFIL_PIN_OZETLERI değeri: yalnızca scrypt özetleri, şifrenin kendisi değil */
+const pinDigest = () => JSON.stringify(pinHashes());
+
+function env(p, s, { local = false } = {}) {
+  const live = !local && liveUrl();
   return {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
@@ -97,7 +168,8 @@ function env(p, s) {
     PORT: String(p),
     HOSTNAME: '127.0.0.1',
     APP_URL: `http://127.0.0.1:${p}`,
-    DATABASE_URL: 'file:' + DB().replace(/\\/g, '/'),
+    DATABASE_URL: live || 'file:' + DB().replace(/\\/g, '/'),
+    ...(live ? { ORBIT_DB: 'pg' } : {}),
     AUTH_SECRET: s.authSecret,
     PROFIL_PIN_OZETLERI: JSON.stringify(pinHashes()),
     // Growth OS güvenlik kilidi: onaylı mesajların otomatik gönderimi yalnızca kullanıcı açarsa
@@ -123,7 +195,8 @@ function start() {
     ensureDb();
     const s = secrets();
     const p = await freePort();
-    const child = spawn(process.execPath, ['server.js'], { cwd: ROOT(), env: env(p, s), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // orbit-db.js: canlı modda PostgreSQL istemcisini seçip server.js'i başlatır (yerel modda doğrudan başlatır)
+    const child = spawn(process.execPath, [fs.existsSync(path.join(ROOT(), 'orbit-db.js')) ? 'orbit-db.js' : 'server.js'], { cwd: ROOT(), env: env(p, s), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     proc = child; port = p;
     const tail = [];
     const keep = (d) => { for (const l of String(d).split(/\r?\n/).filter(Boolean)) { tail.push(l); if (tail.length > 30) tail.shift(); } };
@@ -134,7 +207,7 @@ function start() {
       if (code) log.warn(`Growth OS sunucusu kapandı (kod ${code}): ${tail.slice(-3).join(' | ')}`);
     });
     try { await waitReady(p); } catch (e) { stop(); throw e; }
-    log.info(`Growth OS yerel sunucusu açıldı: 127.0.0.1:${p}`);
+    log.info(`Growth OS ${isLive() ? 'sunucusu (canlı veritabanı: Supabase)' : 'yerel sunucusu'} açıldı: 127.0.0.1:${p}`);
     return url();
   })().finally(() => { starting = null; });
   return starting;
@@ -152,6 +225,7 @@ const url = () => (port ? `http://127.0.0.1:${port}` : null);
  * Bağlantı adresi kaydedilmez ve loglanmaz. Mevcut yerel veriler silinip yerine aktarılır.
  */
 async function importFrom(databaseUrl) {
+  if (isLive()) throw new Error("Canlı moddayken veri taşınmaz: veriler zaten Supabase'den okunuyor");
   if (!/^postgres(ql)?:\/\/[^\s]+$/i.test(String(databaseUrl || '').trim())) throw new Error('Geçerli bir PostgreSQL bağlantı adresi girin (postgresql://…)');
   stop();
   ensureDb();
@@ -183,4 +257,4 @@ async function importFrom(databaseUrl) {
   return { counts: result.counts, backup };
 }
 
-module.exports = { start, stop, url, secrets, importFrom, hasPin, setPin, DB, ROOT, TENANTS };
+module.exports = { start, stop, url, secrets, importFrom, hasPin, setPin, isLive, goLive, goLocal, pinDigest, DB, ROOT, TENANTS };

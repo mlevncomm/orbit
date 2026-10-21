@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, Tray, Menu, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, Tray, Menu, nativeImage, screen, clipboard } = require('electron');
 // Geliştirme sürümü kurulu Orbit'in ayarlarına ve tek-örnek kilidine dokunmasın
 if (!app.isPackaged) app.setPath('userData', app.getPath('userData') + ' Dev');
 const log = require('./services/log');
@@ -421,6 +421,10 @@ handle('growth:save-settings', (p) => growth.saveSettings(p || {}));
 handle('growth:whatsapp', () => growth.whatsapp());
 handle('growth:whatsapp-action', (a) => growth.whatsappAction(a));
 handle('growth:import', (url) => growth.importData(url));
+handle('growth:go-live', (url) => growth.goLive(url));
+handle('growth:go-local', () => growth.goLocal());
+// Web sürümü (Vercel) için PROFIL_PIN_OZETLERI değerini panoya kopyalar (yalnızca scrypt özetleri)
+handle('growth:copy-pin-digest', () => { clipboard.writeText(growth.pinDigest()); return true; });
 handle('growth:sending', (on) => (on === undefined ? growth.sending() : growth.setSending(on)));
 handle('growth:lock', () => growth.lock());
 handle('growth:overview', () => growth.overview());

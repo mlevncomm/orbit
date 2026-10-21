@@ -42,7 +42,7 @@ async function call(method, route, body) {
   return data;
 }
 
-const status = () => ({ connected: !!jar.wexon_admin && !!jar.wexon_profil, profile: profileName, local: true, running: !!server.url() });
+const status = () => ({ connected: !!jar.wexon_admin && !!jar.wexon_profil, profile: profileName, local: !server.isLive(), live: server.isLive(), running: !!server.url() });
 
 async function profiles() {
   const r = await call('GET', '/api/profil');
@@ -200,11 +200,15 @@ async function setSending(on) {
   return { sending: !!on };
 }
 
+/** Canlı veritabanına (Supabase) geç / yerele dön: veri taşındıktan sonra profil yeniden açılır */
+async function goLive(url) { const r = await server.goLive(url); jar = {}; profileName = null; return r; }
+async function goLocal() { const r = await server.goLocal(); jar = {}; profileName = null; return r; }
+
 async function importData(url) {
   const r = await server.importFrom(url);
   jar = {}; profileName = null; // taşınan veriyle oturum yeniden açılır
   return r;
 }
 
-module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, settings, saveSettings, whatsapp, whatsappAction, importData, setSending, message, messageAction, deleteLead, templates, saveTemplate, deleteTemplate, stopCampaign, queueControl, exportLeads,
+module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, settings, saveSettings, whatsapp, whatsappAction, importData, goLive, goLocal, pinDigest: () => server.pinDigest(), setSending, message, messageAction, deleteLead, templates, saveTemplate, deleteTemplate, stopCampaign, queueControl, exportLeads,
   setPin: (t, pin, cur) => server.setPin(t, pin, cur).then(() => { jar = {}; profileName = null; return true; }), sending: () => !!store.get('settings').growthSending, _jar: () => jar };

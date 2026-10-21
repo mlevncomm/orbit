@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "productName": "Orbit",
-  "version": "1.15.2",
+  "version": "1.16.0",
   "description": "Orbit by wexon.dev — kişisel bilgisayar kontrol merkezi: tek tıkla kurulum, RGB, ESP32, Growth OS ve öğrenen asistan",
   "main": "src/main/main.js",
   "author": "wexon.dev",

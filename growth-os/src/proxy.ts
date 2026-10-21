@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decodeSession, SESSION_COOKIE, authConfigured } from "@/lib/session-token";
 import { decodeProfile, inProfileGroup, PROFILE_COOKIE } from "@/lib/app-profiles";
+import { accessConfigured, verifyAccess } from "@/lib/cf-access";
 
 // Profil seçmeden de açılabilen yollar (oturum yine gerekir)
 const PROFILE_FREE = ["/api/me"];
@@ -12,8 +13,19 @@ function isPublic(pathname: string) {
   return PUBLIC.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // Web sürümü: Cloudflare Access'ten geçmeyen istek hiçbir sayfaya ulaşamaz (zamanlanmış görev kendi sırrıyla gelir)
+  if (accessConfigured()) {
+    const cron = process.env.CRON_SECRET && request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+    const token = request.headers.get("cf-access-jwt-assertion") ?? request.cookies.get("CF_Authorization")?.value;
+    if (!cron && !(await verifyAccess(token))) {
+      return new NextResponse("Bu sayfa özel: orbit.wexon.dev üzerinden Cloudflare Access ile giriş yapın.", {
+        status: 403,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+  }
   if (isPublic(pathname)) {
     return NextResponse.next();
   }

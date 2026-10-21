@@ -95,6 +95,17 @@ PAGES.wexonAfter = () => {
     for (const k of ['dailyCap', 'delayMinSec', 'delayMaxSec']) if (o[k] !== '') o[k] = +o[k];
     wx(() => api.growth.saveSettings(o), (r) => { W.settings = r; toast('Growth OS ayarları kaydedildi'); });
   });
+  const lv = $('#wxLive');
+  if (lv) lv.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = $('#wxLiveUrl').value.trim();
+    if (!confirm("Growth OS canlı veritabanına (Supabase) geçsin mi?\n\nBu bilgisayardaki müşteriler, şablonlar ve ayarlar Supabase'e yazılır; sonra masaüstü ve orbit.wexon.dev aynı veriyi kullanır. İstediğinde 'Yerele dön' ile geri alınır.")) return;
+    W.liveBusy = true; renderPage();
+    api.growth.goLive(url).then((r) => {
+      W.status = null; W.profiles = null; W.loaded = {}; W.overview = null;
+      toast(`Canlı: ${r.counts.Lead || 0} müşteri, ${r.counts.Template || 0} şablon Supabase'e yazıldı`);
+    }).catch((err) => toast(err.message, true)).finally(() => { W.liveBusy = false; renderPage(); });
+  });
   const imp = $('#wxImport');
   if (imp) imp.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -167,7 +178,24 @@ function loginView() {
     </section>
     <div class="wx-profiles">${cards || (W.err ? `<div class="card empty small"><p>${h(W.err)}</p><button class="btn sm" data-wx="retry">${I('refresh')}Tekrar dene</button></div>` : '<div class="card empty small"><span class="spinner"></span></div>')}</div>
     ${pinBox}
-    ${importCard()}`;
+    ${W.status?.live ? '' : importCard()}${liveCard()}`;
+}
+
+function liveCard() {
+  const live = W.status?.live;
+  return `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>${I('globe', 16)} Canlı veritabanı · orbit.wexon.dev</h3>
+      <p class="sub">${live
+        ? "Growth OS verileri Supabase'de; masaüstü Orbit ve orbit.wexon.dev aynı veriyi eş zamanlı kullanıyor. WhatsApp gönderimini yalnızca bu bilgisayar yapar."
+        : "Açınca Growth OS verileri Supabase'e taşınır ve orbit.wexon.dev ile eş zamanlı çalışır. Bu bilgisayardaki veriler Supabase'e yazılır (aynı kayıtlarda bu bilgisayar kazanır, Supabase'den hiçbir şey silinmez)."}</p></div>
+      <span class="chip"><span class="status-dot ${live ? 'done' : ''}"></span>${live ? 'Canlı' : 'Yalnızca bu bilgisayar'}</span></div>
+    ${live
+      ? `<div class="row" style="margin-top:12px"><button class="btn" data-wx="pin-digest">${I('lock')}Web için PIN özetini kopyala</button><span class="spacer"></span><button class="btn" data-wx="go-local" ${W.liveBusy ? 'disabled' : ''}>${W.liveBusy ? '<span class="spinner"></span>Dönülüyor…' : I('download') + 'Yerele dön'}</button></div>
+        <p class="sub" style="margin-top:8px">PIN özeti şifrenin kendisi değildir; Vercel'de PROFIL_PIN_OZETLERI olarak girilince web'de de aynı PIN'le girersin.</p>`
+      : `<form class="row" id="wxLive" style="flex-wrap:nowrap;margin-top:12px">
+          <input class="input" id="wxLiveUrl" type="password" autocomplete="off" placeholder="postgresql://… (Supabase › Connect › Session pooler)" required ${W.liveBusy ? 'disabled' : ''} style="flex:1">
+          <button class="btn primary" type="submit" ${W.liveBusy ? 'disabled' : ''}>${W.liveBusy ? '<span class="spinner"></span>Bağlanıyor…' : I('globe') + 'Canlıya geç'}</button>
+        </form>
+        <p class="sub" style="margin-top:8px">Bağlantı adresi Windows hesabınla şifrelenip yalnızca bu bilgisayarda saklanır, günlüğe yazılmaz.</p>`}</div>`;
 }
 
 function importCard() {
@@ -221,7 +249,7 @@ function settingsView() {
         <button class="btn primary sm" type="submit">Değiştir</button>
       </div>
     </form>
-    ${importCard()}`;
+    ${W.status?.live ? '' : importCard()}${liveCard()}`;
 }
 
 function overviewView() {
@@ -384,6 +412,12 @@ document.addEventListener('click', async (e) => {
     case 'lock': return wx(() => api.growth.lock(), (st) => { W.status = st; W.overview = W.leads = W.queue = W.campaigns = null; W.profiles = null; W.loaded = {}; toast('Growth OS kilitlendi'); });
     case 'retry': W.err = ''; W.profiles = null; return renderPage();
     case 'export': return wx(() => api.growth.exportLeads({ q: W.q, status: W.st }), (f) => f && toast('Excel kaydedildi'));
+    case 'pin-digest': return api.growth.copyPinDigest().then(() => toast('PIN özeti panoya kopyalandı (Vercel › PROFIL_PIN_OZETLERI)')).catch((e) => toast(e.message, true));
+    case 'go-local':
+      if (!confirm("Yerel veritabanına dönülsün mü?\n\nSupabase'deki güncel veriler bu bilgisayara kopyalanır (önce yerel yedek alınır). orbit.wexon.dev çalışmaya devam eder ama masaüstüyle eş zamanlı olmaz.")) return;
+      W.liveBusy = true; renderPage();
+      return api.growth.goLocal().then((r) => { W.status = null; W.profiles = null; W.loaded = {}; W.overview = null; toast(`Yerele dönüldü: ${r.counts?.Lead || 0} müşteri kopyalandı`); })
+        .catch((e) => toast(e.message, true)).finally(() => { W.liveBusy = false; renderPage(); });
     case 'wa-on': return wx(() => api.growth.whatsappAction('connect'), (r) => { W.wa = r; });
     case 'wa-off':
       if (!confirm('WhatsApp Web bağlantısı kesilsin mi? Yeniden bağlamak için QR okutman gerekir.')) return;
