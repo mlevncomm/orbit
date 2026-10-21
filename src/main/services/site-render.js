@@ -18,6 +18,38 @@ const FINISH_ANIM = `(async () => {
   }
   return true;
 })()`;
+// Betikle çizilen içerik betikler kaldırılınca boş kalır: <canvas> o anki görüntüsüyle <img>'e çevrilir,
+// oynayan videonun (ör. HLS) o anki karesi kapak resmi (poster) yapılır. Çapraz kaynaklı (tainted) olanlar atlanır.
+const FREEZE_MEDIA = `(() => {
+  let n = 0;
+  for (const c of [...document.querySelectorAll('canvas')]) {
+    try {
+      if (!c.width || !c.height || c.width * c.height > 16e6) continue;
+      const url = c.toDataURL('image/webp', 0.9);
+      if (url.length < 1500) continue; // boş canvas
+      const img = document.createElement('img');
+      for (const a of ['class', 'style', 'id', 'width', 'height', 'aria-label']) if (c.hasAttribute(a)) img.setAttribute(a, c.getAttribute(a));
+      if (!img.getAttribute('style')) img.setAttribute('style', 'width:' + c.clientWidth + 'px;height:' + c.clientHeight + 'px');
+      img.alt = ''; img.src = url; img.dataset.orbit = 'canvas';
+      c.replaceWith(img); n++;
+    } catch {}
+  }
+  for (const v of document.querySelectorAll('video')) {
+    // Betikle bağlanan video dosyası (ör. hls('...mp4')) HTML'e yazılır: klonlayıcı indirir, klonda kendi oynar
+    if (!v.getAttribute('src') && !v.querySelector('source') && /^https?:/.test(v.currentSrc || '')) {
+      v.setAttribute('src', v.currentSrc);
+      if (v.loop || !v.paused || v.autoplay) { v.setAttribute('autoplay', ''); v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.removeAttribute('preload'); }
+      n++;
+    }
+    try {
+      if (v.readyState < 2 || !v.videoWidth) continue;
+      const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      v.setAttribute('poster', c.toDataURL('image/jpeg', 0.85)); n++;
+    } catch {}
+  }
+  return n;
+})()`;
 
 
 class Renderer {
@@ -91,6 +123,7 @@ class Renderer {
       await this.waitIdle(wc, 700, 10000);
       await sleep(1200);
       await wc.executeJavaScript(FINISH_ANIM, true).catch(() => {});
+      await wc.executeJavaScript(FREEZE_MEDIA, true).catch(() => {});
       const html = await wc.executeJavaScript(`(() => {
         const dt = document.doctype ? '<!DOCTYPE ' + document.doctype.name + '>' : '<!DOCTYPE html>';
         return dt + '\\n' + document.documentElement.outerHTML;

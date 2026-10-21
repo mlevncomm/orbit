@@ -381,6 +381,7 @@ function siteView() {
       <div class="row">${[[`${st.pages}/${st.pageLimit}`, 'sayfa'], [st.assets, 'dosya'], [fmtMB(st.bytes), 'indirildi'], [st.errors, 'hata'], [st.skippedRobots, 'robots ile atlandı']].map(([n, l]) => `<span class="chip"><b>${n}</b> ${l}</span>`).join('')}</div>
       ${sim?.pages?.length ? `<div class="section-title" style="margin-top:18px">Orijinal ile klon karşılaştırması</div><div class="rec-list">${sim.pages.map((p) => `<div class="rec-item"><span class="age ${simClass(p.score)}">%${p.score}</span><div class="txt"><b>${h(p.page)}</b></div>
           <button class="btn sm" data-site-open="${h(p.original)}" data-what="file">Orijinal</button><button class="btn sm" data-site-open="${h(p.clone)}" data-what="file">Klon</button></div>`).join('')}</div>` : ''}
+      ${st.failReason && !running ? `<p class="note">${I('alert', 14)}<span>${h(st.failReason)}</span></p>` : ''}
       ${st.errorList?.length && !running ? `<details style="margin-top:10px"><summary class="sub">Hatalar (${st.errors})</summary><div class="mono" style="margin-top:6px">${st.errorList.map((e) => `${h(e.url)} — ${h(e.error)}`).join('<br>')}</div></details>` : ''}</div>` : ''}
     <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Klonlar</h3><p class="sub">Belgeler › Orbit Siteler</p></div></div>
       <div class="rec-list">${hist || '<div class="empty small">Henüz site klonlanmadı.</div>'}</div></div>`;

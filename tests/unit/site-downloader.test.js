@@ -36,10 +36,25 @@ test('göreli bağlantı ve robots.txt kuralları', () => {
   assert.equal(H.rel('index.html', 'img/a.png'), './img/a.png');
   assert.equal(H.rel('index.html', 'hakkimizda/index.html', '#ekip'), './hakkimizda/index.html#ekip');
   const rules = H.robots('User-agent: Googlebot\nDisallow: /yok\n\nUser-agent: *\nDisallow: /admin\nDisallow: /tmp/*\n');
-  assert.deepEqual(rules, ['/admin', '/tmp/*']);
+  assert.deepEqual(rules, [{ allow: false, pat: '/admin' }, { allow: false, pat: '/tmp/*' }]);
   assert.equal(H.allowed(rules, '/admin/giris'), false);
   assert.equal(H.allowed(rules, '/tmp/x'), false);
   assert.equal(H.allowed(rules, '/yok'), true, 'yalnızca * kuralları geçerli');
+  // pentayazilim.com: "/*?page=" tüm siteyi DEĞİL yalnızca sayfalama adreslerini yasaklar
+  const penta = H.robots('User-agent: *\n\n\n\nDisallow: /*?page=\nDisallow: /*?filter=\n\nSitemap: https://x/sitemap.xml\n');
+  assert.equal(H.allowed(penta, '/'), true);
+  assert.equal(H.allowed(penta, '/hizmetler'), true);
+  assert.equal(H.allowed(penta, '/blog?page=2'), false);
+  // "$" son, Allow önceliği (en uzun eşleşme), boş Disallow, ortak grup
+  const r2 = H.robots('User-agent: a\nUser-agent: *\nDisallow: /*.pdf$\nDisallow: /ozel/\nAllow: /ozel/acik\nDisallow:\n');
+  assert.equal(H.allowed(r2, '/dosya.pdf'), false);
+  assert.equal(H.allowed(r2, '/dosya.pdf?x=1'), true);
+  assert.equal(H.allowed(r2, '/ozel/gizli'), false);
+  assert.equal(H.allowed(r2, '/ozel/acik/sayfa'), true);
+  // HTML varlıkları çözülür; srcset'teki data: adresi dosya sanılmaz
+  assert.equal(H.unent('/m/b&amp;C-webp.webp?x=1&#38;y=2'), '/m/b&C-webp.webp?x=1&y=2');
+  assert.deepEqual(H.srcsetUrls('data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7 1x, /a,b.png 2x, /c.png 3x'), ['/a,b.png', '/c.png']);
+  assert.deepEqual(H.htmlRefs('<img src="/m/b&amp;C.webp" srcset="data:image/gif;base64,R0lG 1x">').map((r) => r.raw), ['/m/b&C.webp']);
   assert.equal(H.isPageLike(new URL('https://s.com/img/a.png')), false);
   assert.equal(H.isPageLike(new URL('https://s.com/iletisim')), true);
 });

@@ -30,7 +30,7 @@ const H = {
   /** HTML'deki tüm kaynak başvuruları: { raw, kind: 'page'|'asset' } */
   htmlRefs(html) {
     const out = [];
-    const add = (raw, kind) => { raw = raw.trim(); if (raw && !/^(#|data:|blob:|mailto:|tel:|javascript:|about:)/i.test(raw)) out.push({ raw, kind }); };
+    const add = (raw, kind) => { raw = H.unent(raw.trim()); if (raw &&!/^(#|data:|blob:|mailto:|tel:|javascript:|about:)/i.test(raw)) out.push({ raw, kind }); };
     for (const m of html.matchAll(/<(a|area)\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) add(m[3] ?? m[4] ?? m[5], 'page');
     for (const m of html.matchAll(/<link\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
       const tag = m[0]; const v = m[2] ?? m[3] ?? m[4];
@@ -38,11 +38,19 @@ const H = {
     }
     for (const m of html.matchAll(/\b(?:src|poster|data-src|data-original|data-lazy-src)\s*=\s*("([^"]*)"|'([^']*)')/gi)) add(m[2] ?? m[3], 'asset');
     for (const m of html.matchAll(/\b(?:srcset|data-srcset)\s*=\s*("([^"]*)"|'([^']*)')/gi)) {
-      for (const part of (m[2] ?? m[3]).split(',')) add(part.trim().split(/\s+/)[0], 'asset');
+      for (const part of H.srcsetUrls(m[2] ?? m[3])) add(part, 'asset');
     }
     for (const m of html.matchAll(/<meta\b[^>]*?(?:property|name)\s*=\s*["'](?:og:image|twitter:image)["'][^>]*?content\s*=\s*["']([^"']+)["']/gi)) add(m[1], 'asset');
     for (const r of H.cssRefs(html.replace(/&quot;/g, "'"))) out.push(r); // <style> ve style="" içindeki url()
     return out;
+  },
+  /** HTML özniteliğindeki karakter varlıklarını çözer (ör. "b&amp;C.webp" → "b&C.webp") */
+  unent(s) {
+    return String(s).replace(/&(amp|quot|apos|#39|#38|#x26);/gi, (m, e) => ({ amp: '&', quot: '"', apos: "'", '#39': "'", '#38': '&', '#x26': '&' })[e.toLowerCase()]);
+  },
+  /** srcset adresleri: adaylar ", " ile ayrılır; data: adresindeki virgüller bölünmez */
+  srcsetUrls(v) {
+    return String(v).trim().split(/,\s+(?=\S)/).map((p) => p.trim().split(/\s+/)[0]).filter((u) => u && !/^data:/i.test(u));
   },
   /** CSS'teki url(...) ve @import başvuruları */
   cssRefs(css) {
@@ -74,15 +82,29 @@ const H = {
     if (!r.startsWith('.')) r = './' + r;
     return r + hash;
   },
-  /** robots.txt'den "*" için yasaklı yollar */
+  /**
+   * robots.txt'den "*" grubunun kuralları (RFC 9309): [{ allow, pat }].
+   * Ardışık User-agent satırları tek grup sayılır; boş Disallow hiçbir şeyi yasaklamaz.
+   */
   robots(txt) {
-    const rules = []; let applies = false;
+    const rules = []; let applies = false; let inAgents = false;
     for (const line of String(txt).split(/\r?\n/)) {
-      const [k, ...rest] = line.replace(/#.*/, '').split(':'); const v = rest.join(':').trim();
-      if (/^user-agent$/i.test(k.trim())) applies = v === '*';
-      else if (applies && /^disallow$/i.test(k.trim()) && v) rules.push(v);
+      const [k0, ...rest] = line.replace(/#.*/, '').split(':'); const k = k0.trim().toLowerCase(); const v = rest.join(':').trim();
+      if (k === 'user-agent') { applies = (inAgents && applies) || v === '*'; inAgents = true; continue; }
+      if (k === 'allow' || k === 'disallow') { inAgents = false; if (applies && v) rules.push({ allow: k === 'allow', pat: v }); }
     }
     return rules;
+  },
+  /** Yol + sorgu indirilebilir mi: "*" joker, "$" son; en uzun eşleşen kural kazanır, eşitlikte Allow */
+  allowed(rules, pathAndQuery) {
+    let best = null;
+    for (const { allow, pat } of rules || []) {
+      const end = pat.endsWith('$');
+      const body = (end ? pat.slice(0, -1) : pat).split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+      if (!new RegExp('^' + body + (end ? '$' : '')).test(pathAndQuery)) continue;
+      if (!best || pat.length > best.pat.length || (pat.length === best.pat.length && allow)) best = { allow, pat };
+    }
+    return !best || best.allow;
   },
   /** Statik klon: betikler, betik ön yüklemeleri ve <noscript> (sayfa zaten çizildi) kaldırılır; JSON-LD kalır */
   stripScripts(html) {
@@ -97,7 +119,6 @@ const H = {
     const e = TYPE_EXT[String(type).split(';')[0].trim().toLowerCase()];
     return e ? local + e : local;
   },
-  allowed(rules, pathname) { return !rules.some((r) => pathname.startsWith(r.replace(/\*.*$/, ''))); },
   isPageLike(u) { return !ASSET_EXT.test(u.pathname) && (PAGE_EXT.test(u.pathname) || !path.posix.extname(u.pathname)); },
 };
 
@@ -112,7 +133,7 @@ class SiteDownloader extends EventEmitter {
       pages: j.pagesDone, pageLimit: j.opts.maxPages, queued: j.pageQueue.length, assets: j.assetsDone,
       bytes: j.bytes, errors: j.errors.length, errorList: j.errors.slice(-20), current: j.current, startedAt: j.startedAt, endedAt: j.endedAt || null,
       skippedRobots: j.skippedRobots, mode: j.opts.render ? 'render' : 'fast', scripts: j.opts.scripts,
-      phase: j.phase, similarity: j.similarity || null,
+      phase: j.phase, similarity: j.similarity || null, failReason: j.failReason || null,
     };
   }
   emitStatus() { const now = Date.now(); if (now - (this.lastEmit || 0) > 250 || this.job.state !== 'running') { this.lastEmit = now; this.emit('status', this.snapshot()); } }
@@ -191,7 +212,7 @@ class SiteDownloader extends EventEmitter {
     // 1) Sayfalar (aynı alan adı, BFS)
     while (j.pageQueue.length && j.pagesDone < j.opts.maxPages && !j.cancelled) {
       const { u, depth } = j.pageQueue.shift();
-      if (j.opts.robots && !H.allowed(j.robotRules, u.pathname)) { j.skippedRobots++; continue; }
+      if (j.opts.robots && !H.allowed(j.robotRules, u.pathname + u.search)) { j.skippedRobots++; continue; }
       j.current = u.href; this.emitStatus();
       try {
         let buf, type, finalUrl, rendered = null;
@@ -207,7 +228,13 @@ class SiteDownloader extends EventEmitter {
         if (!/html/i.test(type)) { // sayfa sandığımız şey aslında dosya
           this.write(H.localPath(u, j.host, false), buf); j.assetsDone++; j.pagesDone++; continue;
         }
-        const html = buf.toString('utf8');
+        let html = buf.toString('utf8');
+        // Betikler korunacaksa çizilmiş DOM değil sunucunun özgün HTML'i saklanır: betikler çevrimdışı açılışta
+        // sayfayı baştan kurar (çizilmiş DOM'a ikinci kez uygulanınca yazı efektleri, kaydırıcılar ikilenir).
+        // Dosyalar yine tarayıcının çizerken yüklediklerinden toplanır.
+        if (rendered && j.opts.scripts === 'keep') {
+          try { const raw = await this.fetchBuf(finalUrl.href, 'text/html,application/xhtml+xml,*/*'); if (/html/i.test(raw.type)) html = raw.buf.toString('utf8'); } catch {}
+        }
         const local = H.localPath(u, j.host, true);
         j.pages.set(local, { url: finalUrl, html });
         if (rendered) {
@@ -255,7 +282,7 @@ class SiteDownloader extends EventEmitter {
     // 3) Bağlantıları yerel dosyalara çevir ve yaz
     const downloadedPages = new Set(j.pages.keys());
     const mapRef = (raw, base, fromLocal, kind) => {
-      let abs; try { abs = new URL(raw, base); } catch { return null; }
+      let abs; try { abs = new URL(H.unent(raw), base); } catch { return null; }
       if (!/^https?:$/.test(abs.protocol)) return null;
       const hash = abs.hash; abs.hash = '';
       if (kind === 'page' && H.sameSite(abs.host, j.host) && H.isPageLike(abs)) {
@@ -278,7 +305,7 @@ class SiteDownloader extends EventEmitter {
         .replace(/(<(?:a|area)\b[^>]*?\bhref\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => { const raw = d ?? s; const r = mapRef(raw, url, local, 'page'); return r ? `${pre}"${r}"` : m; })
         .replace(/(<link\b[^>]*?\bhref\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => { const r = mapRef(d ?? s, url, local, /stylesheet|icon|preload|manifest/i.test(m) ? 'asset' : 'page'); return r ? `${pre}"${r}"` : m; })
         .replace(/(\b(?:src|poster|data-src|data-original|data-lazy-src)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => { const r = mapRef(d ?? s, url, local, 'asset'); return r ? `${pre}"${r}"` : m; })
-        .replace(/(\b(?:srcset|data-srcset)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => `${pre}"${(d ?? s).split(',').map((part) => { const [u0, ...rest] = part.trim().split(/\s+/); const r = mapRef(u0, url, local, 'asset'); return [r || u0, ...rest].join(' '); }).join(', ')}"`)
+        .replace(/(\b(?:srcset|data-srcset)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (m, pre, all, d, s) => `${pre}"${(d ?? s).trim().split(/,\s+(?=\S)/).map((part) => { const [u0, ...rest] = part.trim().split(/\s+/); const r = /^data:/i.test(u0) ? null : mapRef(u0, url, local, 'asset'); return [r || u0, ...rest].join(' '); }).join(', ')}"`)
         .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, a, css, b) => a + rewriteCss(css, url, local) + b)
         .replace(/(\sstyle\s*=\s*")([^"]*)(")/gi, (m, a, css, b) => a + rewriteCss(css.replace(/&quot;/g, "'"), url, local).replace(/"/g, '&quot;') + b);
       this.write(local, out);
@@ -311,7 +338,14 @@ class SiteDownloader extends EventEmitter {
     const summary = { kaynak: j.start, indirilme: new Date().toISOString(), sayfa: j.pagesDone, dosya: j.assetsDone, boyutMB: +(j.bytes / 1048576).toFixed(1), hatalar: j.errors, robotsAtlanan: j.skippedRobots, yontem: j.opts.render ? 'tarayıcıda çizim' : 'yalnızca HTML', betikler: j.opts.scripts, benzerlik: j.similarity, arac: 'Orbit Site Klonlayıcı · wexon.dev' };
     fs.writeFileSync(path.join(j.dir, '_orbit-ozet.json'), JSON.stringify(summary, null, 2));
     if (j.cancelled) { j.state = 'cancelled'; }
-    else {
+    else if (!j.pagesDone) {
+      // Hiç sayfa inmediyse "bitti" denmez: sebep açıkça gösterilir
+      j.state = 'error';
+      j.failReason = j.skippedRobots && !j.errors.length
+        ? "Sitenin robots.txt dosyası sayfaların indirilmesini yasaklıyor. Site senin ya da izinliysen 'robots.txt'ye uy' seçeneğini kapatıp yeniden dene."
+        : `Hiçbir sayfa indirilemedi: ${j.errors[0]?.error || 'site yanıt vermedi'}`;
+      log.warn('Site indirme başarısız: ' + j.failReason);
+    } else {
       if (j.opts.zip) {
         j.current = 'Zip oluşturuluyor…'; this.emitStatus();
         const zip = j.dir + '.zip';
