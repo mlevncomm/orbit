@@ -25,8 +25,11 @@ swap('<meta charset="utf-8" />', '<meta charset="utf-8" />\n  <base href="/app/"
 swap('<title>Orbit · wexon.dev</title>', '<title>Orbit</title>');
 // Masaüstündeki preload köprüsü web'de de AYNEN çalışır: 'electron' yerine orbit-web.js'in uzaktan yönetim köprüsü verilir
 swap('<script src="icons.js"></script>', '<script src="orbit-web.js"></script>\n  <script src="orbit-preload.js"></script>\n  <script src="icons.js"></script>');
-fs.writeFileSync(path.join(out, 'index.html'), html);
 const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'preload.js'), 'utf8');
 fs.writeFileSync(path.join(out, 'orbit-preload.js'),
   `// Üretildi: scripts/build-web.js ← src/main/preload.js (elle düzenlemeyin)\n(() => {\nconst require = (m) => { if (m === 'electron') return window.__orbitElectron; throw new Error('Web: ' + m); };\n${preload}\n})();\n`);
+// Yeni yayından sonra tarayıcı eski betiği önbellekten kullanmasın: her betik / stil adresine içerik özeti eklenir
+const hash = (f) => require('crypto').createHash('sha256').update(fs.readFileSync(path.join(out, f))).digest('hex').slice(0, 10);
+html = html.replace(/(<script src|<link rel="stylesheet" href)="([\w.-]+\.(?:js|css))"/g, (_, attr, f) => `${attr}="${f}?v=${hash(f)}"`);
+fs.writeFileSync(path.join(out, 'index.html'), html);
 console.log('Orbit web arayüzü hazır:', out);

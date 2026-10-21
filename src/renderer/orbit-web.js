@@ -161,6 +161,12 @@
       remote.online = Boolean(r.state?.online); remote.pc = r.state?.pc || null; remote.version = r.state?.version || null;
       remote.last = r.last ?? remote.last;
       for (const e of r.events || []) for (const fn of remote.listeners.get(e.channel) || []) { try { fn(null, e.payload); } catch {} }
+      // Yalnızca satış ekranlarıyla açıldıysa ve bilgisayar sonradan çevrimiçi olduysa: tüm menüler için bir kez yenile
+      if (remote.online && document.documentElement.classList.contains('web-limited')) {
+        let last = 0;
+        try { last = +sessionStorage.getItem('orbit.reloadedAt') || 0; } catch {}
+        if (Date.now() - last > 60_000) { try { sessionStorage.setItem('orbit.reloadedAt', String(Date.now())); } catch {} location.reload(); }
+      }
     } catch {}
   }
   const startPolling = () => {

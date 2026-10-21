@@ -30,7 +30,9 @@ export async function proxy(request: NextRequest) {
   // API dışındaki her sayfa adresi onu açar
   if (pathname.startsWith("/app/")) return NextResponse.next();
   if (!pathname.startsWith("/api/") && pathname !== "/api" && !pathname.startsWith("/_next/")) {
-    return NextResponse.rewrite(new URL("/app/index.html", request.url));
+    const page = NextResponse.rewrite(new URL("/app/index.html", request.url));
+    page.headers.set("Cache-Control", "no-cache, no-store, must-revalidate"); // yeni yayın hemen görünsün
+    return page;
   }
   if (isPublic(pathname)) {
     return NextResponse.next();
