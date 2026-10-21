@@ -21,6 +21,7 @@ const DEFAULTS = {
     userName: '',
     minimizeToTray: true,
     startWithWindows: true,  // RGB görünümünün açılışta geri gelmesi için varsayılan açık
+    remoteControl: false,    // orbit.wexon.dev'den uzaktan yönetim: yalnızca kullanıcı açarsa
     rgbEngine: 'hardware',   // 'hardware' (cihazın kendi efekti) | 'sync' (yazılım senkron)
     esp32LedAuto: true,      // ESP32 LED'i bilgisayarın durumunu yansıtsın
     esp32AutoConnect: true,  // açılışta / kart takılınca son porta kendiliğinden bağlan

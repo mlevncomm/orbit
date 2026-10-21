@@ -1,7 +1,8 @@
 // Orbit web köprüsü (orbit.wexon.dev): masaüstündeki window.orbit (preload.js) yerine geçer.
-// Aynı Orbit arayüzü tarayıcıda çalışır; Growth OS istekleri aynı sitenin /api uçlarına gider (çerezleri tarayıcı yönetir).
-// Masaüstüne özgü her şey (kurulum, ışıklar, ESP32, site klonlayıcı, canlı veritabanı...) burada yoktur:
-// ya sessizce boş döner ya da "yalnızca masaüstü Orbit'te" hatası verir.
+// Aynı Orbit arayüzü tarayıcıda çalışır:
+// - Satış ekranları (growth.*) aynı sitenin /api uçlarına gider (çerezleri tarayıcı yönetir).
+// - Diğer her şey (kurulum, ışıklar, ESP32, site klonlayıcı, asistan, ayarlar...) bilgisayardaki Orbit'te çalışır
+//   (uzaktan yönetim; aşağıda). Bilgisayar kapalıysa yalnızca satış ekranları açılır.
 (() => {
   const DESKTOP = 'Bu işlem yalnızca masaüstü Orbit\'te yapılır';
   const desktopOnly = () => Promise.reject(new Error(DESKTOP));
@@ -149,9 +150,43 @@
   };
   for (const [k, f] of Object.entries(growth)) growth[k] = (...a) => { try { return Promise.resolve(f(...a)); } catch (e) { return Promise.reject(e); } };
 
+  // ---------- Uzaktan yönetim: bilgisayardaki Orbit ----------
+  // Masaüstünün preload.js'i (orbit-preload.js) burada AYNEN çalışır; yalnızca ipcRenderer'ı bu köprü sağlar:
+  // invoke → /api/orbit/call (komut Supabase üzerinden bilgisayardaki Orbit'e gider), on → /api/orbit/events.
+  const remote = { online: false, pc: null, version: null, last: null, listeners: new Map(), timer: null };
+  async function poll() {
+    try {
+      const q = remote.last === null ? '' : `?after=${remote.last}`;
+      const r = await fetch(`/api/orbit/events${q}`, { credentials: 'same-origin', cache: 'no-store' }).then((x) => x.json());
+      remote.online = Boolean(r.state?.online); remote.pc = r.state?.pc || null; remote.version = r.state?.version || null;
+      remote.last = r.last ?? remote.last;
+      for (const e of r.events || []) for (const fn of remote.listeners.get(e.channel) || []) { try { fn(null, e.payload); } catch {} }
+    } catch {}
+  }
+  const startPolling = () => {
+    if (remote.timer) return;
+    remote.timer = setInterval(() => { if (document.visibilityState === 'visible') poll(); }, 1500);
+  };
+  const ipcRenderer = {
+    async invoke(channel, ...args) {
+      if (/^growth:/.test(channel)) return { ok: false, error: 'İç hata: satış istekleri web sunucusuna gider' };
+      try {
+        const res = await fetch('/api/orbit/call', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel, args }) });
+        const j = await res.json().catch(() => ({}));
+        if (res.status === 503) remote.online = false;
+        return res.ok ? { ok: true, data: j.data } : { ok: false, error: j.error || `Bilgisayara ulaşılamadı (HTTP ${res.status})` };
+      } catch (e) {
+        return { ok: false, error: 'Bilgisayara ulaşılamadı' };
+      }
+    },
+    on(channel, fn) { if (!remote.listeners.has(channel)) remote.listeners.set(channel, new Set()); remote.listeners.get(channel).add(fn); },
+    removeListener(channel, fn) { remote.listeners.get(channel)?.delete(fn); },
+    send() {}, // günlük ve tepsi bildirimleri yalnızca masaüstünde
+  };
+
   const DEFAULTS = { theme: 'dark', userName: '' };
-  const api = {
-    web: true,
+  // Bilgisayar kapalıyken: tema / arayüz durumu bu tarayıcıda tutulur, yalnızca satış ekranları açılır
+  const offline = {
     settings: {
       get: async () => ({ ...DEFAULTS, ...read('orbit.settings', {}) }),
       set: async (p) => { const v = { ...DEFAULTS, ...read('orbit.settings', {}), ...p }; write('orbit.settings', v); return v; },
@@ -162,9 +197,27 @@
     },
     app: { log: () => {}, openLogs: desktopOnly },
     update: { status: async () => ({ current: 'web', state: 'idle' }), onStatus: () => () => {}, check: desktopOnly, download: desktopOnly, install: desktopOnly },
-    growth,
   };
-  // Masaüstüne özgü diğer tüm bölümler: on* olay abonelikleri boş kalır, diğer çağrılar "yalnızca masaüstü" der
   const stub = new Proxy({}, { get: (_, k) => (typeof k === 'string' && /^on[A-Z]/.test(k) ? () => () => {} : desktopOnly) });
-  window.orbit = new Proxy(api, { get: (t, k) => (k in t ? t[k] : typeof k === 'string' && /^on[A-Z]/.test(k) ? () => () => {} : stub) });
+
+  let desktop = {};
+  const web = {
+    web: true,
+    growth,
+    /** Bilgisayardaki Orbit çevrimiçi mi? Açılışta bir kez sorulur, sonra olaylar izlenir */
+    async remoteCheck() { await poll(); startPolling(); return remote.online; },
+    remoteInfo: () => ({ online: remote.online, pc: remote.pc, version: remote.version }),
+  };
+  window.__orbitElectron = {
+    ipcRenderer,
+    contextBridge: { exposeInMainWorld: (_name, api) => { desktop = api; } },
+  };
+  window.orbit = new Proxy({}, {
+    get(_, k) {
+      if (k in web) return web[k];
+      if (!remote.online && k in offline) return offline[k];
+      if (k in desktop) return desktop[k];
+      return typeof k === 'string' && /^on[A-Z]/.test(k) ? () => () => {} : stub;
+    },
+  });
 })();

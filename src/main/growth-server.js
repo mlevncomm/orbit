@@ -257,4 +257,4 @@ async function importFrom(databaseUrl) {
   return { counts: result.counts, backup };
 }
 
-module.exports = { start, stop, url, secrets, importFrom, hasPin, setPin, isLive, goLive, goLocal, pinDigest, DB, ROOT, TENANTS };
+module.exports = { start, stop, url, secrets, importFrom, hasPin, setPin, isLive, liveUrl, goLive, goLocal, pinDigest, DB, ROOT, TENANTS };

@@ -793,8 +793,8 @@ button.stat { cursor: pointer; }
 .wx-pin .input::placeholder { letter-spacing: normal; font-size: 15px; }
 
 /* Web sürümü (orbit.wexon.dev): kurulum akışı paneli ve masaüstüne özgü düğmeler yok */
-html.web .feed, html.web .top-actions [data-action="toggle-feed"], html.web .top-actions [data-focus-search] { display: none !important; }
-html.web .shell { grid-template-columns: 232px minmax(0, 1fr); }
-@media (max-width: 1240px) { html.web .shell { grid-template-columns: 200px minmax(0, 1fr); } }
-@media (max-width: 1000px) { html.web .shell { grid-template-columns: 66px minmax(0, 1fr); } }
-@media (max-width: 760px) { html.web .shell { grid-template-columns: minmax(0, 1fr); } }
+html.web-limited .feed, html.web-limited .top-actions [data-action="toggle-feed"], html.web-limited .top-actions [data-focus-search] { display: none !important; }
+html.web-limited .shell { grid-template-columns: 232px minmax(0, 1fr); }
+@media (max-width: 1240px) { html.web-limited .shell { grid-template-columns: 200px minmax(0, 1fr); } }
+@media (max-width: 1000px) { html.web-limited .shell { grid-template-columns: 66px minmax(0, 1fr); } }
+@media (max-width: 760px) { html.web-limited .shell { grid-template-columns: minmax(0, 1fr); } }

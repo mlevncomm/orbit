@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, Tray, Menu, nativeImage, screen, clipboard } = require('electron');
 // Geliştirme sürümü kurulu Orbit'in ayarlarına ve tek-örnek kilidine dokunmasın
 if (!app.isPackaged) app.setPath('userData', app.getPath('userData') + ' Dev');
@@ -139,7 +140,9 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
-const send = (channel, payload) => win && !win.isDestroyed() && win.webContents.send(channel, payload);
+const remote = require('./services/remote');
+// Arayüz olayı: bu penceredeki arayüze ve (uzaktan yönetim açıksa) orbit.wexon.dev'deki arayüze
+const send = (channel, payload) => { remote.publish(channel, payload); return win && !win.isDestroyed() && win.webContents.send(channel, payload); };
 installer.on('progress', (p) => {
   send('install:progress', p);
   if (p.status === 'done' && p.name) memory.noteInstall(p.name);
@@ -151,7 +154,8 @@ installer.on('state', (s) => {
 });
 inventory.on('changed', (sum) => send('inventory:changed', sum));
 
-const handle = (ch, fn) => ipcMain.handle(ch, async (_e, ...args) => {
+const HANDLERS = new Map(); // kanal → işleyici (uzaktan yönetim aynı işleyicileri kullanır)
+const handle = (ch, fn) => HANDLERS.set(ch, fn) && ipcMain.handle(ch, async (_e, ...args) => {
   try { return { ok: true, data: await fn(...args) }; } catch (e) {
     log.warn(`IPC ${ch} başarısız`, e);
     return { ok: false, error: e.message || String(e) };
@@ -370,6 +374,7 @@ async function setSettings(patch) {
   store.patch('settings', rest);
   store.flush();
   if ('startWithWindows' in rest) await applyStartup();
+  if ('remoteControl' in rest) await syncRemote();
   if ('bridgeEnabled' in rest && bridge) await (rest.bridgeEnabled ? bridge.start() : bridge.stop()).catch((e) => log.warn('Köprü', e));
   if ('rgbEngine' in rest) rgb.restore();
   if (rest.theme && win) {
@@ -421,8 +426,13 @@ handle('growth:save-settings', (p) => growth.saveSettings(p || {}));
 handle('growth:whatsapp', () => growth.whatsapp());
 handle('growth:whatsapp-action', (a) => growth.whatsappAction(a));
 handle('growth:import', (url) => growth.importData(url));
-handle('growth:go-live', (url) => growth.goLive(url));
-handle('growth:go-local', () => growth.goLocal());
+handle('growth:go-live', (url) => growth.goLive(url).finally(syncRemote));
+handle('growth:go-local', () => growth.goLocal().finally(syncRemote));
+// Uzaktan yönetim (orbit.wexon.dev): yalnızca kullanıcı açarsa ve canlı veritabanı bağlıysa
+function syncRemote() {
+  return remote.sync({ handlers: HANDLERS, url: require('./growth-server').liveUrl, version: app.getVersion(), pc: os.hostname() }).catch((e) => log.warn('Uzaktan yönetim', e));
+}
+handle('remote:status', () => remote.status());
 // Web sürümü (Vercel) için PROFIL_PIN_OZETLERI değerini panoya kopyalar (yalnızca scrypt özetleri)
 handle('growth:copy-pin-digest', () => { clipboard.writeText(growth.pinDigest()); return true; });
 handle('growth:sending', (on) => (on === undefined ? growth.sending() : growth.setSending(on)));
@@ -559,6 +569,7 @@ if (!app.requestSingleInstanceLock()) {
     rgb.restore();
     inventory.get().catch((e) => log.warn('Envanter', e));
     startAutomation();
+    syncRemote();
   });
 }
 app.on('before-quit', () => { quitting = true; store.flush(); memory.flush(); require('./growth-server').stop(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });

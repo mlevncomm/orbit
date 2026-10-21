@@ -54,12 +54,16 @@ const SECTIONS = [
     { label: 'Kurulum geçmişi', icon: 'refresh', page: 'settings', anchor: 'history' },
   ] },
 ];
-// Web sürümü (orbit.wexon.dev): yalnızca Wexon satış ekranları; masaüstüne özgü bölümler ve site klonlayıcı yok
+// Web sürümü (orbit.wexon.dev): bilgisayardaki Orbit açıksa tüm menüler birebir (uzaktan yönetim);
+// kapalıysa yalnızca satış ekranları (WEB_LIMITED)
 const WEB = Boolean(api.web);
-if (WEB) {
+let WEB_LIMITED = false;
+if (WEB) document.documentElement.classList.add('web');
+function limitToSales() {
+  WEB_LIMITED = true;
   SECTIONS.splice(0, SECTIONS.length, ...SECTIONS.filter((s) => s.id === 'wexon'));
   SECTIONS[0].items = SECTIONS[0].items.filter((i) => !i.group?.startsWith('Web stüdyosu') && i.label !== 'Site Klonlayıcı');
-  document.documentElement.classList.add('web');
+  document.documentElement.classList.add('web-limited');
 }
 // Eski düz liste (başka yerlerde sayfa adı / simgesi için)
 const NAV = SECTIONS.flatMap((s) => s.items.map((i) => ({ id: i.page, label: i.label, icon: i.icon })));
@@ -220,7 +224,7 @@ function scrollToAnchor(anchor) {
 }
 
 function navigate(page) {
-  if (!PAGES[page] || (WEB && page !== 'wexon')) page = WEB ? 'wexon' : 'dashboard';
+  if (!PAGES[page] || (WEB_LIMITED && page !== 'wexon')) page = WEB_LIMITED ? 'wexon' : 'dashboard';
   if (S.page !== page) S.sub = null;
   S.page = page;
   saveUi({ page });
@@ -694,6 +698,9 @@ PAGES.settings = () => {
         <h3>Başlangıç ve arka plan</h3>
         ${sw('startWithWindows', 'Windows açılınca arka planda başlat', 'Son RGB görünümün her açılışta otomatik geri gelir.')}
         ${sw('minimizeToTray', 'Kapatınca sistem tepsisine küçült', 'Işık efektleri ve güncelleme denetimi çalışmaya devam eder.')}
+        ${WEB
+          ? `<p class="note">${I('globe', 14)}<span>Bu sayfa ${h(api.remoteInfo().pc || 'bilgisayarın')} üzerindeki Orbit'i uzaktan yönetiyor. Uzaktan yönetimi yalnızca masaüstü Orbit'ten kapatabilirsin.</span></p>`
+          : sw('remoteControl', 'Uzaktan yönetim (orbit.wexon.dev)', 'Açıkken orbit.wexon.dev\'den bu bilgisayardaki Orbit\'i yönetebilirsin: program kurma, ışıklar, ESP32, klonlama. Canlı veritabanı (Wexon › Ayarlar) bağlı olmalı. Yeniden başlatma ve dosya açma uzaktan yapılamaz.')}
       </div>
       <div class="card form" data-anchor="update">
         <h3>Güncellemeler ve hakkında</h3>
@@ -1148,7 +1155,7 @@ async function initWeb() {
 }
 
 async function init() {
-  if (WEB) return initWeb();
+  if (WEB && !(await api.remoteCheck())) { limitToSales(); return initWeb(); }
   S.settings = await api.settings.get();
   const ui = await api.ui.get().catch(() => ({}));
   if (ui.cat) S.cat = ui.cat;

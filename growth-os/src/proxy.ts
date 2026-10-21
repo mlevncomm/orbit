@@ -7,7 +7,7 @@ import { accessConfigured, verifyAccess } from "@/lib/cf-access";
 const PROFILE_FREE = ["/api/me"];
 
 // Programa giriş profil ekranındaki 4 haneli şifreyle yapılır; /giris yalnızca üst yönetici içindir
-const PUBLIC = ["/giris", "/profil", "/api/profil", "/api/auth", "/api/instagram/webhook", "/api/outreach/tick", "/api/surum"];
+const PUBLIC = ["/giris", "/profil", "/api/profil", "/api/auth", "/api/instagram/webhook", "/api/outreach/tick", "/api/surum", "/api/orbit"];
 
 function isPublic(pathname: string) {
   return PUBLIC.some((p) => pathname === p || pathname.startsWith(`${p}/`));

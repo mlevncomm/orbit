@@ -23,7 +23,10 @@ const swap = (a, b) => {
 // Her adreste (/, /musteriler, ...) dosyalar /app/ altından yüklensin
 swap('<meta charset="utf-8" />', '<meta charset="utf-8" />\n  <base href="/app/" />');
 swap('<title>Orbit · wexon.dev</title>', '<title>Orbit</title>');
-// Masaüstündeki preload köprüsünün yerine web köprüsü, diğer betiklerden önce
-swap('<script src="icons.js"></script>', '<script src="orbit-web.js"></script>\n  <script src="icons.js"></script>');
+// Masaüstündeki preload köprüsü web'de de AYNEN çalışır: 'electron' yerine orbit-web.js'in uzaktan yönetim köprüsü verilir
+swap('<script src="icons.js"></script>', '<script src="orbit-web.js"></script>\n  <script src="orbit-preload.js"></script>\n  <script src="icons.js"></script>');
 fs.writeFileSync(path.join(out, 'index.html'), html);
+const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'preload.js'), 'utf8');
+fs.writeFileSync(path.join(out, 'orbit-preload.js'),
+  `// Üretildi: scripts/build-web.js ← src/main/preload.js (elle düzenlemeyin)\n(() => {\nconst require = (m) => { if (m === 'electron') return window.__orbitElectron; throw new Error('Web: ' + m); };\n${preload}\n})();\n`);
 console.log('Orbit web arayüzü hazır:', out);
