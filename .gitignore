@@ -7,3 +7,4 @@ growth-os/node_modules/
 growth-os/.next/
 growth-os/prisma/*.db
 growth-os/prisma/*.db-journal
+growth-os/public/app/

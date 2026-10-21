@@ -26,6 +26,12 @@ export async function proxy(request: NextRequest) {
       });
     }
   }
+  // Arayüz Orbit'in kendisi (public/app, masaüstüyle birebir): dosyaları oturumsuz yüklenir (veri API'de korunur),
+  // API dışındaki her sayfa adresi onu açar
+  if (pathname.startsWith("/app/")) return NextResponse.next();
+  if (!pathname.startsWith("/api/") && pathname !== "/api" && !pathname.startsWith("/_next/")) {
+    return NextResponse.rewrite(new URL("/app/index.html", request.url));
+  }
   if (isPublic(pathname)) {
     return NextResponse.next();
   }

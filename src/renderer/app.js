@@ -34,7 +34,7 @@ const SECTIONS = [
     { label: 'Wi-Fi paneli', icon: 'globe', page: 'esp32', anchor: 'esp-wifi' },
   ] },
   { id: 'wexon', label: 'Wexon', icon: 'wexon', items: [
-    { group: 'Growth OS', label: 'Özet', icon: 'grid', page: 'wexon', set: () => wxTab('ozet'), on: () => W.tab === 'ozet' },
+    { group: 'Satış', label: 'Özet', icon: 'grid', page: 'wexon', set: () => wxTab('ozet'), on: () => W.tab === 'ozet' },
     { label: 'Müşteriler', icon: 'users', page: 'wexon', set: () => wxTab('musteriler'), on: () => W.tab === 'musteriler' },
     { label: 'Müşteri Bul', icon: 'mappin', page: 'wexon', set: () => wxTab('bul'), on: () => W.tab === 'bul' },
     { label: 'WhatsApp', icon: 'message', page: 'wexon', set: () => wxTab('whatsapp'), on: () => W.tab === 'whatsapp', badge: () => W.overview?.pending || W.queue?.pendingJobs?.length, hot: true },
@@ -54,6 +54,13 @@ const SECTIONS = [
     { label: 'Kurulum geçmişi', icon: 'refresh', page: 'settings', anchor: 'history' },
   ] },
 ];
+// Web sürümü (orbit.wexon.dev): yalnızca Wexon satış ekranları; masaüstüne özgü bölümler ve site klonlayıcı yok
+const WEB = Boolean(api.web);
+if (WEB) {
+  SECTIONS.splice(0, SECTIONS.length, ...SECTIONS.filter((s) => s.id === 'wexon'));
+  SECTIONS[0].items = SECTIONS[0].items.filter((i) => !i.group?.startsWith('Web stüdyosu') && i.label !== 'Site Klonlayıcı');
+  document.documentElement.classList.add('web');
+}
 // Eski düz liste (başka yerlerde sayfa adı / simgesi için)
 const NAV = SECTIONS.flatMap((s) => s.items.map((i) => ({ id: i.page, label: i.label, icon: i.icon })));
 const sectionOf = (page) => SECTIONS.find((s) => s.items.some((i) => i.page === page)) || SECTIONS[0];
@@ -213,7 +220,7 @@ function scrollToAnchor(anchor) {
 }
 
 function navigate(page) {
-  if (!PAGES[page]) page = 'dashboard';
+  if (!PAGES[page] || (WEB && page !== 'wexon')) page = WEB ? 'wexon' : 'dashboard';
   if (S.page !== page) S.sub = null;
   S.page = page;
   saveUi({ page });
@@ -1129,7 +1136,19 @@ window.addEventListener('unhandledrejection', (e) => { window.__orbitErrors++; a
 
 // Açılış, TÜM betikler (lights.js, esp32.js) yüklendikten sonra başlar: aksi halde kayıtlı sayfa
 // (ör. ESP32) henüz tanımlanmamışken çizilmeye çalışılıyordu (yarış durumu).
+/** Web sürümü açılışı: yalnızca ayarlar ve Wexon sayfası (kurulum, donanım, güncelleme yüklenmez) */
+async function initWeb() {
+  S.settings = await api.settings.get();
+  document.documentElement.dataset.theme = S.settings.theme;
+  S.update = { state: 'idle' };
+  S.version = 'web';
+  S.page = 'wexon';
+  hydrateIcons();
+  renderChrome(); renderPage();
+}
+
 async function init() {
+  if (WEB) return initWeb();
   S.settings = await api.settings.get();
   const ui = await api.ui.get().catch(() => ({}));
   if (ui.cat) S.cat = ui.cat;

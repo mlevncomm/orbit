@@ -10,6 +10,8 @@ const tpl = path.join(dir, 'prisma', 'template.db');
 const env = { ...process.env, DATABASE_URL: 'file:./template.db', NEXT_TELEMETRY_DISABLED: '1' };
 const run = (cmd) => execSync(cmd, { cwd: dir, stdio: 'inherit', env });
 
+require('./build-web'); // Orbit web arayüzü (public/app) derlemeye girsin
+
 if (!fs.existsSync(path.join(dir, 'node_modules'))) run('npm ci --no-audit --no-fund');
 run('npx prisma generate');
 fs.rmSync(tpl, { force: true });

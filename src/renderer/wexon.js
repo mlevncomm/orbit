@@ -41,7 +41,7 @@ async function wxLoad(tab = W.tab) {
 PAGES.wexon = () => {
   const tabs = [['ozet', 'grid', 'Özet'], ['musteriler', 'users', 'Müşteriler'], ['bul', 'mappin', 'Müşteri Bul'], ['whatsapp', 'message', 'WhatsApp'], ['site', 'globe', 'Site İndirici']];
   const connected = W.status?.connected;
-  const title = { sablonlar: ['Şablonlar', 'Hazır mesajlar'], ayarlar: ['Ayarlar ve WhatsApp', 'Growth OS anahtarları, gönderim sınırları ve WhatsApp Web bağlantısı'], ozet: ['Growth OS', 'wexon.dev müşteri ve satış merkezi'], musteriler: ['Müşteriler', 'Growth OS müşteri listesi'], bul: ['Müşteri Bul', 'Google Places ile yeni işletme keşfi'], whatsapp: ['WhatsApp', 'Onay bekleyen satış mesajları'], site: ['Site Klonlayıcı', 'wexon.dev web stüdyosu · bir siteyi birebir kopyala'] }[W.tab] || ['Wexon', ''];
+  const title = { sablonlar: ['Şablonlar', 'Hazır mesajlar'], ayarlar: ['Ayarlar ve WhatsApp', 'Anahtarlar, gönderim sınırları ve WhatsApp bağlantısı'], ozet: ['Özet', 'wexon.dev müşteri ve satış merkezi'], musteriler: ['Müşteriler', 'Tüm müşteri adayları'], bul: ['Müşteri Bul', 'Google Places ile yeni işletme keşfi'], whatsapp: ['WhatsApp', 'Onay bekleyen satış mesajları'], site: ['Site Klonlayıcı', 'wexon.dev web stüdyosu · bir siteyi birebir kopyala'] }[W.tab] || ['Wexon', ''];
   const head = `<div class="page-head"><div><h1>${title[0]}</h1><p>${title[1]}</p></div>
     <div class="row">${connected && W.tab !== 'site' ? `<span class="chip"><span class="status-dot done"></span>${h(W.status.profile || 'Profil açık')}</span><button class="btn" data-wx="lock">${I('lock')}Kilitle</button>` : ''}</div></div>`;
 
@@ -93,13 +93,13 @@ PAGES.wexonAfter = () => {
     e.preventDefault();
     const o = Object.fromEntries(new FormData(sf2).entries());
     for (const k of ['dailyCap', 'delayMinSec', 'delayMaxSec']) if (o[k] !== '') o[k] = +o[k];
-    wx(() => api.growth.saveSettings(o), (r) => { W.settings = r; toast('Growth OS ayarları kaydedildi'); });
+    wx(() => api.growth.saveSettings(o), (r) => { W.settings = r; toast('Ayarlar kaydedildi'); });
   });
   const lv = $('#wxLive');
   if (lv) lv.addEventListener('submit', (e) => {
     e.preventDefault();
     const url = $('#wxLiveUrl').value.trim();
-    if (!confirm("Growth OS canlı veritabanına (Supabase) geçsin mi?\n\nBu bilgisayardaki müşteriler, şablonlar ve ayarlar Supabase'e yazılır; sonra masaüstü ve orbit.wexon.dev aynı veriyi kullanır. İstediğinde 'Yerele dön' ile geri alınır.")) return;
+    if (!confirm("Orbit canlı veritabanına (Supabase) geçsin mi?\n\nBu bilgisayardaki müşteriler, şablonlar ve ayarlar Supabase'e yazılır; sonra masaüstü ve orbit.wexon.dev aynı veriyi kullanır. İstediğinde 'Yerele dön' ile geri alınır.")) return;
     W.liveBusy = true; renderPage();
     api.growth.goLive(url).then((r) => {
       W.status = null; W.profiles = null; W.loaded = {}; W.overview = null;
@@ -110,7 +110,7 @@ PAGES.wexonAfter = () => {
   if (imp) imp.addEventListener('submit', (e) => {
     e.preventDefault();
     const url = $('#wxImportUrl').value.trim();
-    if (!confirm('Eski Growth OS verileri bu bilgisayara taşınsın mı?\n\nOrbit\'teki mevcut Growth OS verileri silinip yerine aktarılır (önce yedeği alınır). Bağlantı adresi kaydedilmez.')) return;
+    if (!confirm('Eski veriler bu bilgisayara taşınsın mı?\n\nOrbit\'teki mevcut müşteri verileri silinip yerine aktarılır (önce yedeği alınır). Bağlantı adresi kaydedilmez.')) return;
     W.importing = true; renderPage();
     api.growth.importData(url).then((r) => {
       W.importResult = r; W.status = { connected: false }; W.profiles = null; W.loaded = {}; W.overview = null;
@@ -166,6 +166,7 @@ function loginView() {
         <div class="row" style="flex-wrap:nowrap"><input class="input" id="wxPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="••••" ${W.busy ? 'disabled' : ''}>
         <button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>${W.busy ? '<span class="spinner"></span>' : I('lock')}Aç</button></div>
         ${W.pinErr ? `<p class="sub" style="color:var(--danger);margin-top:8px">${h(W.pinErr)}</p>` : ''}</form>`
+    : WEB ? `<div class="card wx-pin"><h3>${h(pick.name)} · şifre</h3><p class="note">${I('lock', 14)}<span>Bu profilin şifresi henüz belirlenmemiş. Şifreyi masaüstü Orbit'te belirle, sonra burada aynı şifreyle girersin.</span></p></div>`
     : `<form class="card wx-pin" id="wxPinNew"><h3>${h(pick.name)} · şifre belirle</h3><p class="sub">Bu profil bundan sonra bu şifreyle açılır. 4-8 rakam; unutma, Orbit şifreyi kendisi göstermez.</p>
         <div class="row"><input class="input" id="wxPin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Yeni şifre" style="flex:1">
         <input class="input" id="wxPin2" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Tekrar" style="flex:1">
@@ -173,20 +174,20 @@ function loginView() {
         ${W.pinErr ? `<p class="sub" style="color:var(--danger);margin-top:8px">${h(W.pinErr)}</p>` : ''}</form>`;
   return `
     <section class="page-banner mesh sky">
-      <div><span class="kicker">Growth OS · Orbit'in içinde</span><h2>Profilini seç</h2>
-        <p>Müşteri bulma, satış mesajları ve onaylı WhatsApp kuyruğu bu bilgisayarda çalışır; veriler burada saklanır, dışarıda bir sunucuya bağlanılmaz.</p></div>
+      <div><span class="kicker">${WEB ? 'Orbit · orbit.wexon.dev' : 'Orbit · wexon.dev'}</span><h2>Profilini seç</h2>
+        <p>${WEB ? 'Müşteri bulma, satış mesajları ve onaylı WhatsApp kuyruğu; masaüstü Orbit ile aynı veri, eş zamanlı. Yalnızca sana açık.' : 'Müşteri bulma, satış mesajları ve onaylı WhatsApp kuyruğu bu bilgisayarda çalışır; veriler burada saklanır, dışarıda bir sunucuya bağlanılmaz.'}</p></div>
     </section>
     <div class="wx-profiles">${cards || (W.err ? `<div class="card empty small"><p>${h(W.err)}</p><button class="btn sm" data-wx="retry">${I('refresh')}Tekrar dene</button></div>` : '<div class="card empty small"><span class="spinner"></span></div>')}</div>
     ${pinBox}
-    ${W.status?.live ? '' : importCard()}${liveCard()}`;
+    ${WEB ? '' : (W.status?.live ? '' : importCard()) + liveCard()}`;
 }
 
 function liveCard() {
   const live = W.status?.live;
   return `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>${I('globe', 16)} Canlı veritabanı · orbit.wexon.dev</h3>
       <p class="sub">${live
-        ? "Growth OS verileri Supabase'de; masaüstü Orbit ve orbit.wexon.dev aynı veriyi eş zamanlı kullanıyor. WhatsApp gönderimini yalnızca bu bilgisayar yapar."
-        : "Açınca Growth OS verileri Supabase'e taşınır ve orbit.wexon.dev ile eş zamanlı çalışır. Bu bilgisayardaki veriler Supabase'e yazılır (aynı kayıtlarda bu bilgisayar kazanır, Supabase'den hiçbir şey silinmez)."}</p></div>
+        ? "Müşteri verileri Supabase'de; masaüstü Orbit ve orbit.wexon.dev aynı veriyi eş zamanlı kullanıyor. WhatsApp gönderimini yalnızca bu bilgisayar yapar."
+        : "Açınca müşteri verileri Supabase'e taşınır ve orbit.wexon.dev ile eş zamanlı çalışır. Bu bilgisayardaki veriler Supabase'e yazılır (aynı kayıtlarda bu bilgisayar kazanır, Supabase'den hiçbir şey silinmez)."}</p></div>
       <span class="chip"><span class="status-dot ${live ? 'done' : ''}"></span>${live ? 'Canlı' : 'Yalnızca bu bilgisayar'}</span></div>
     ${live
       ? `<div class="row" style="margin-top:12px"><button class="btn" data-wx="pin-digest">${I('lock')}Web için PIN özetini kopyala</button><span class="spacer"></span><button class="btn" data-wx="go-local" ${W.liveBusy ? 'disabled' : ''}>${W.liveBusy ? '<span class="spinner"></span>Dönülüyor…' : I('download') + 'Yerele dön'}</button></div>
@@ -200,7 +201,7 @@ function liveCard() {
 
 function importCard() {
   const r = W.importResult;
-  return `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Eski Growth OS verilerini taşı</h3>
+  return `<div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Eski verileri taşı</h3>
       <p class="sub">Supabase'deki müşteriler, keşifler, şablonlar, mesaj geçmişi ve ayarlar (Places / Gemini anahtarları dahil) bir kerelik bu bilgisayara aktarılır. WhatsApp bağlantısı taşınmaz; Orbit'te QR ile yeniden bağlanırsın.</p></div></div>
     ${r ? `<div class="note">${I('check', 14)}<span>Taşındı: ${Object.entries(r.counts).filter(([, n]) => n).map(([k, n]) => `${n} ${h(k)}`).join(' · ')}. Önceki yerel veri yedeği: ${h(r.backup.split(/[\\\\/]/).pop())}</span></div>` : ''}
     <form class="row" id="wxImport" style="flex-wrap:nowrap;margin-top:12px">
@@ -216,7 +217,7 @@ function settingsView() {
   const waText = { ready: 'Bağlı', qr: 'QR kodu telefonla okut', starting: 'Bağlanıyor…', error: 'Hata', disconnected: 'Bağlı değil' }[wa?.state] || 'Bağlı değil';
   return `
     <div class="two" style="margin-top:0">
-      <div class="card form">
+      ${WEB ? `<div class="card form"><h3>WhatsApp</h3><p class="note">${I('message', 14)}<span>WhatsApp bağlantısı ve otomatik gönderim masaüstü Orbit'ten yapılır. Buradan mesaj taslaklarını onaylayabilir, müşteriye WhatsApp'tan yazabilirsin.</span></p></div>` : `<div class="card form">
         <h3>WhatsApp Web</h3>
         <p class="sub">Telefonundaki WhatsApp'ı bağla: WhatsApp › Bağlı cihazlar › Cihaz bağla ile QR kodu okut. Mesajlar yalnızca sen onayladıktan sonra, senin numarandan gider.</p>
         <div class="row"><span class="chip"><span class="status-dot ${wa?.state === 'ready' ? 'done' : wa?.state === 'error' ? 'error' : ['qr', 'starting'].includes(wa?.state) ? 'running' : ''}"></span>${h(waText)}</span>
@@ -225,7 +226,7 @@ function settingsView() {
         ${wa?.qrDataUrl && wa.state === 'qr' ? `<img class="wx-qr" src="${h(wa.qrDataUrl)}" alt="WhatsApp QR">` : ''}
         ${wa?.error ? `<p class="note">${I('alert', 14)}<span>${h(wa.error)}</span></p>` : ''}
         <label class="switch"><input type="checkbox" id="wxSending" ${W.sending ? 'checked' : ''}><span>Onaylanan mesajları otomatik gönder<small>Kapalıyken mesajlar kuyrukta bekler, hiçbiri gönderilmez (güvenlik kilidi). Açınca onayladıkların günlük sınır ve bekleme süresiyle sırayla gider.</small></span></label>
-      </div>
+      </div>`}
       <form class="card form" id="wxSettings">
         <h3>Anahtarlar ve sınırlar</h3>
         ${s.ortakAnahtar ? `<p class="note">${I('alert', 14)}<span>Bu profil Google ve Gemini anahtarlarını ${h(s.ortakAnahtar)} profilinden kullanır.</span></p>` : ''}
@@ -236,10 +237,10 @@ function settingsView() {
           <label class="field"><span class="sub">Bekleme (sn) en az</span><input class="input sm" name="delayMinSec" type="number" min="5" max="600" value="${s.delayMinSec}"></label>
           <label class="field"><span class="sub">en çok</span><input class="input sm" name="delayMaxSec" type="number" min="5" max="900" value="${s.delayMaxSec}"></label>
         </div>
-        <div class="row"><span class="sub">Anahtarlar yalnızca bu bilgisayardaki Growth OS veritabanında tutulur.</span><span class="spacer"></span><button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>Kaydet</button></div>
+        <div class="row"><span class="sub">Anahtarlar yalnızca Orbit veritabanında tutulur.</span><span class="spacer"></span><button class="btn primary" type="submit" ${W.busy ? 'disabled' : ''}>Kaydet</button></div>
       </form>
     </div>
-    <form class="card form" id="wxPinChange" style="margin-top:14px">
+    ${WEB ? '' : `<form class="card form" id="wxPinChange" style="margin-top:14px">
       <h3>Profil şifresini değiştir</h3>
       <div class="row">
         <select class="input sm" name="tenant">${(W.profiles || [{ tenantId: 'tnt_wexon_dev', name: 'Wexon.dev' }, { tenantId: 'tnt_aquails', name: 'Aquails' }]).map((p) => `<option value="${h(p.tenantId)}">${h(p.name)}</option>`).join('')}</select>
@@ -248,18 +249,18 @@ function settingsView() {
         <input class="input sm" name="again" type="password" inputmode="numeric" maxlength="8" placeholder="Yeni şifre tekrar" style="max-width:none;flex:1">
         <button class="btn primary sm" type="submit">Değiştir</button>
       </div>
-    </form>
-    ${W.status?.live ? '' : importCard()}${liveCard()}`;
+    </form>`}
+    ${WEB ? '' : (W.status?.live ? '' : importCard()) + liveCard()}`;
 }
 
 function overviewView() {
   const o = W.overview;
-  if (!o) return `<div class="card empty"><span class="spinner"></span><p>Growth OS özeti alınıyor…</p></div>`;
+  if (!o) return `<div class="card empty"><span class="spinner"></span><p>Özet alınıyor…</p></div>`;
   const stats = [[o.leads, 'müşteri adayı'], [o.pending ?? 0, 'onay bekleyen mesaj'], [o.sentToday ?? 0, `bugün gönderilen / ${o.dailyCap ?? '—'}`], [o.failed ?? 0, 'başarısız']];
   const queueState = o.sendingLocked ? 'Gönderim kilitli' : o.stopped ? 'Kuyruk durduruldu' : o.paused ? 'Kuyruk duraklatıldı' : 'Kuyruk çalışıyor';
   return `
     <section class="page-banner mesh mint">
-      <div><span class="kicker">${h(o.email || '')}</span><h2>${h(o.tenantName || 'Growth OS')}</h2>
+      <div><span class="kicker">${h(/\.local$/.test(o.email || '') ? 'Orbit · satış' : o.email || '')}</span><h2>${h(o.tenantName || 'Orbit')}</h2>
         <p>${h(queueState)} · mesajlar yalnızca sen onayladıktan sonra, günlük sınır ve bekleme süresiyle gönderilir.</p>
         <div class="row"><button class="btn primary" data-wx-tab="bul">${I('mappin')}Müşteri bul</button><button class="btn" data-wx-tab="whatsapp">${I('message')}Onay bekleyenler (${o.pending ?? 0})</button></div></div>
       <div class="banner-stats">${stats.map(([n, l]) => `<div class="stat glass"><b>${n}</b><span>${h(l)}</span></div>`).join('')}</div>
@@ -320,7 +321,7 @@ function queueView() {
   const q = W.queue;
   if (!q) return `<div class="card empty"><span class="spinner"></span><p>Kuyruk alınıyor…</p></div>`;
   const jobs = q.pendingJobs || [];
-  const state = q.sendingLocked ? ['error', 'Gönderim kilitli (Growth OS ayarı)'] : q.stopped ? ['error', 'Kuyruk durduruldu'] : q.paused ? ['warn', 'Kuyruk duraklatıldı'] : ['done', 'Kuyruk çalışıyor'];
+  const state = q.sendingLocked ? ['error', 'Gönderim kilitli'] : q.stopped ? ['error', 'Kuyruk durduruldu'] : q.paused ? ['warn', 'Kuyruk duraklatıldı'] : ['done', 'Kuyruk çalışıyor'];
   return `
     <section class="page-banner mesh lilac">
       <div><span class="kicker">WhatsApp onay kuyruğu</span><h2>${jobs.length ? `${jobs.length} mesaj onayını bekliyor` : 'Onay bekleyen mesaj yok'}</h2>
@@ -409,7 +410,7 @@ document.addEventListener('click', async (e) => {
     });
   }
   switch (d.wx) {
-    case 'lock': return wx(() => api.growth.lock(), (st) => { W.status = st; W.overview = W.leads = W.queue = W.campaigns = null; W.profiles = null; W.loaded = {}; toast('Growth OS kilitlendi'); });
+    case 'lock': return wx(() => api.growth.lock(), (st) => { W.status = st; W.overview = W.leads = W.queue = W.campaigns = null; W.profiles = null; W.loaded = {}; toast('Profil kilitlendi'); });
     case 'retry': W.err = ''; W.profiles = null; return renderPage();
     case 'export': return wx(() => api.growth.exportLeads({ q: W.q, status: W.st }), (f) => f && toast('Excel kaydedildi'));
     case 'pin-digest': return api.growth.copyPinDigest().then(() => toast('PIN özeti panoya kopyalandı (Vercel › PROFIL_PIN_OZETLERI)')).catch((e) => toast(e.message, true));
