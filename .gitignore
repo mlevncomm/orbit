@@ -3,3 +3,7 @@ dist/
 dist-test/
 firmware/backups/
 firmware/**/build/
+growth-os/node_modules/
+growth-os/.next/
+growth-os/prisma/*.db
+growth-os/prisma/*.db-journal

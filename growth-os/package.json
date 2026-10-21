@@ -1,0 +1,41 @@
+{
+  "name": "gooleads",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "verify:logic": "tsx scripts/verify-logic.mts",
+    "verify:sales": "tsx scripts/verify-sales.mts",
+    "verify:e2e": "tsx scripts/verify-e2e.mts",
+    "check": "npm run lint && npm run typecheck && npm run verify:logic && npm run verify:sales && npm run build",
+    "postinstall": "prisma generate",
+    "db": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@vercel/blob": "^2.3.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "exceljs": "^4.4.0",
+    "next": "16.3.1",
+    "qrcode": "^1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.1",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.6",
+    "typescript": "^5"
+  }
+}

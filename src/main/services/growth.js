@@ -1,29 +1,22 @@
-// Wexon Growth OS istemcisi: Orbit'in Wexon sayfası Growth OS sunucusunun API'sini kullanır.
-// Veri ve iş mantığı (müşteriler, keşif, WhatsApp kuyruğu) sunucuda kalır; arayüz Orbit'tedir.
+// Growth OS istemcisi: Orbit'in Wexon sayfası, Orbit'in İÇİNDE çalışan Growth OS sunucusunu kullanır
+// (growth-server.js → 127.0.0.1). Dışarıdaki bir sunucuya / Vercel'e bağlanılmaz.
 //
 // Güvenlik:
-// - İstekler yalnızca ana süreçten gider; oturum çerezleri arayüze HİÇ verilmez.
-// - Oturum profil (Wexon.dev / Aquails) + PIN ile açılır, yalnızca BELLEKTE tutulur (diske yazılmaz):
-//   Growth OS masaüstü programında olduğu gibi Orbit her açıldığında PIN yeniden istenir.
-// - Sunucu adresi yalnızca https olabilir.
+// - İstekler yalnızca ana süreçten gider; oturum çerezleri arayüze HİÇ verilmez ve yalnızca bellekte tutulur.
+// - Profil şifresini Orbit kendisi üretir ve saklar; kullanıcı PIN girmez.
 const store = require('./store');
 const log = require('./log');
 
-const DEFAULT_URL = 'https://wexon-growth-os.vercel.app';
+const server = require('../growth-server');
 const COOKIES = ['wexon_admin', 'wexon_profil'];
 let jar = {};          // çerez adı → değer (yalnızca bellekte)
 let profileName = null;
 
-function base() {
-  const u = String(store.get('settings').growthUrl || DEFAULT_URL).replace(/\/+$/, '');
-  if (!/^https:\/\/[\w.-]+(:\d+)?$/i.test(u) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(u)) throw new Error('Growth OS adresi https olmalı');
-  return u;
-}
-
 async function call(method, route, body) {
   if (!/^\/api\/[\w/\-[\]?=&.%]+$/.test(route)) throw new Error('Geçersiz istek');
+  const base = await server.start();
   const cookie = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
-  const res = await fetch(base() + route, {
+  const res = await fetch(base + route, {
     method,
     headers: { 'content-type': 'application/json', accept: 'application/json', ...(cookie ? { cookie } : {}), 'user-agent': 'Orbit (wexon.dev)' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -49,17 +42,17 @@ async function call(method, route, body) {
   return data;
 }
 
-const status = () => ({ connected: !!jar.wexon_admin && !!jar.wexon_profil, profile: profileName, url: (() => { try { return base(); } catch { return null; } })() });
+const status = () => ({ connected: !!jar.wexon_admin && !!jar.wexon_profil, profile: profileName, local: true, running: !!server.url() });
 
 async function profiles() {
   const r = await call('GET', '/api/profil');
   return (r.profiller || []).map((p) => ({ tenantId: p.tenantId, name: p.ad, desc: p.aciklama, field: p.alan, letter: p.harf, color: p.renk, accent: p.vurgu, pinLength: p.pinUzunluk, pinSet: p.sifreAyarli, lockedUntil: p.kilitBitis, lastOpened: p.sonAcilis }));
 }
 
-async function open(tenantId, pin) {
+async function open(tenantId) {
   if (!/^tnt_[\w-]+$/.test(String(tenantId))) throw new Error('Geçersiz profil');
-  if (!/^\d{4,8}$/.test(String(pin))) throw new Error('PIN 4-8 rakam olmalı');
-  const r = await call('POST', '/api/profil', { tenantId, pin: String(pin) });
+  jar = {};
+  const r = await call('POST', '/api/profil', { tenantId, pin: server.secrets().pin });
   profileName = r.profil || null;
   log.info(`Growth OS profili açıldı: ${profileName}`);
   return status();
@@ -133,4 +126,32 @@ function moderate(ids, action, message) {
   return call('POST', '/api/outreach/approve', { ids: list, action, ...(action === 'edit' ? { message: String(message || '').slice(0, 4000) } : {}) });
 }
 
-module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, DEFAULT_URL, _jar: () => jar };
+// ---------- Ayarlar ve WhatsApp Web ----------
+const settings = () => call('GET', '/api/settings');
+function saveSettings(p) {
+  const allow = ['googlePlacesApiKey', 'llmApiKey', 'llmModel', 'dailyCap', 'delayMinSec', 'delayMaxSec'];
+  const body = {};
+  for (const k of allow) if (p[k] !== undefined && p[k] !== '') body[k] = typeof p[k] === 'string' ? p[k].trim().slice(0, 300) : p[k];
+  return call('PUT', '/api/settings', body);
+}
+const whatsapp = () => call('GET', '/api/whatsapp');
+function whatsappAction(action) {
+  if (!['connect', 'disconnect'].includes(action)) throw new Error('Geçersiz işlem');
+  return call('POST', '/api/whatsapp', { action });
+}
+/** Otomatik gönderim kilidini aç / kapat: sunucu yeni ayarla yeniden başlar */
+async function setSending(on) {
+  store.patch('settings', { growthSending: !!on });
+  server.stop(); jar = {}; profileName = null;
+  await server.start();
+  log.info(`Growth OS otomatik WhatsApp gönderimi ${on ? 'açıldı' : 'kapatıldı'}`);
+  return { sending: !!on };
+}
+
+async function importData(url) {
+  const r = await server.importFrom(url);
+  jar = {}; profileName = null; // taşınan veriyle oturum yeniden açılır
+  return r;
+}
+
+module.exports = { status, profiles, open, lock, overview, leads, updateLead, campaigns, startCampaign, queue, draft, moderate, settings, saveSettings, whatsapp, whatsappAction, importData, setSending, sending: () => !!store.get('settings').growthSending, _jar: () => jar };

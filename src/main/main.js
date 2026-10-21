@@ -13,7 +13,6 @@ const assistant = require('./ai/assistant');
 const rgb = require('./services/rgb');
 const memory = require('./services/memory');
 const growth = require('./services/growth');
-const projects = require('./services/projects');
 const siteDl = require('./services/site-downloader');
 const updater = require('./services/updater');
 const inventory = require('./services/inventory');
@@ -43,7 +42,7 @@ async function autoConnectEsp32() {
     autoConnectEsp32.lastError = e.message;
   } finally { esp32AutoBusy = false; }
 }
-const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'wexon', 'projects', 'assistant', 'settings'];
+const UI_PAGES = ['dashboard', 'drivers', 'apps', 'lights', 'esp32', 'wexon', 'assistant', 'settings'];
 const { runPS } = require('./services/ps');
 
 process.on('uncaughtException', (e) => log.error('Yakalanmamış hata', e));
@@ -392,7 +391,13 @@ handle('ai:chat', (history) => assistant.chat(history, { emit: send }));
 // ---------- Wexon: Growth OS (arayüz Orbit'te, veri Growth OS sunucusunda) ----------
 handle('growth:status', () => growth.status());
 handle('growth:profiles', () => growth.profiles());
-handle('growth:open', (tenantId, pin) => growth.open(tenantId, pin));
+handle('growth:open', (tenantId) => growth.open(tenantId));
+handle('growth:settings', () => growth.settings());
+handle('growth:save-settings', (p) => growth.saveSettings(p || {}));
+handle('growth:whatsapp', () => growth.whatsapp());
+handle('growth:whatsapp-action', (a) => growth.whatsappAction(a));
+handle('growth:import', (url) => growth.importData(url));
+handle('growth:sending', (on) => (on === undefined ? growth.sending() : growth.setSending(on)));
 handle('growth:lock', () => growth.lock());
 handle('growth:overview', () => growth.overview());
 handle('growth:leads', (opts) => growth.leads(opts || {}));
@@ -402,15 +407,6 @@ handle('growth:campaign', (o) => growth.startCampaign(o || {}));
 handle('growth:queue', () => growth.queue());
 handle('growth:draft', (ids) => growth.draft(ids));
 handle('growth:moderate', (ids, action, message) => growth.moderate(ids, action, message));
-
-// ---------- Projeler (GitHub + canlı siteler + yerel klonlar + Vercel) ----------
-handle('projects:list', (force) => projects.list(!!force));
-handle('projects:clone', (name) => projects.clone(name));
-handle('projects:pull', (name) => projects.pull(name));
-handle('projects:code', (name) => projects.openCode(name));
-handle('projects:folder', (name) => shell.openPath(projects.known(name)));
-handle('projects:vercel-token', (token) => projects.setVercelToken(token));
-handle('projects:has-vercel', () => projects.hasVercel());
 
 // ---------- Wexon: Site İndirici ----------
 const SITES_ROOT = () => path.join(app.getPath('documents'), 'Orbit Siteler');
@@ -537,5 +533,5 @@ if (!app.requestSingleInstanceLock()) {
     startAutomation();
   });
 }
-app.on('before-quit', () => { quitting = true; store.flush(); memory.flush(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });
+app.on('before-quit', () => { quitting = true; store.flush(); memory.flush(); require('./growth-server').stop(); rgb.shutdown(); esp32.disconnect(); bridge?.stop(); });
 app.on('window-all-closed', () => app.quit());

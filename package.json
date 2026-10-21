@@ -1,7 +1,7 @@
 {
   "name": "orbit",
   "productName": "Orbit",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Orbit by wexon.dev — kişisel bilgisayar kontrol merkezi: tek tıkla kurulum, RGB, ESP32, Growth OS ve öğrenen asistan",
   "main": "src/main/main.js",
   "author": "wexon.dev",
@@ -11,7 +11,8 @@
   "scripts": {
     "start": "electron .",
     "icon": "electron scripts/make-icon.js",
-    "dist": "electron-builder --win --publish never",
+    "growth": "node scripts/build-growth.js",
+    "dist": "node scripts/build-growth.js && electron-builder --win --publish never",
     "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1",
     "test": "node --test tests/unit/",
     "test:integration": "node --test --test-concurrency=1 tests/integration/",
@@ -20,6 +21,7 @@
   },
   "build": {
     "copyright": "© 2026 wexon.dev",
+    "afterPack": "scripts/after-pack.js",
     "appId": "com.mlevn.orbit",
     "productName": "Orbit",
     "files": [
@@ -53,6 +55,11 @@
       {
         "from": "plugins",
         "to": "plugins"
+      },
+      {
+        "from": "growth-os/.next/standalone",
+        "to": "growth",
+        "filter": ["**/*", "**/.next/**", "**/node_modules/**", "**/.prisma/**"]
       }
     ]
   },
@@ -64,6 +71,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "electron-updater": "^6.8.9",
-    "openrgb-sdk": "^0.6.0"
+    "openrgb-sdk": "^0.6.0",
+    "pg": "^8.23.1"
   }
 }
