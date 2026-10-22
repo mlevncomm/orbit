@@ -2,10 +2,10 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
-  // Orbit içinde gömülü çalışır: tek klasörlük yerel sunucu (node server.js)
-  output: "standalone",
-  outputFileTracingRoot: path.join(__dirname),
-  turbopack: { root: path.join(__dirname) },
+  // Orbit içinde gömülü çalışır: tek klasörlük yerel sunucu (node server.js). Vercel'de (orbit.wexon.dev) gerekmez.
+  ...(process.env.VERCEL
+    ? {}
+    : { output: "standalone" as const, outputFileTracingRoot: path.join(__dirname), turbopack: { root: path.join(__dirname) } }),
   allowedDevOrigins: ["127.0.0.1"],
   // Sayfanın kendi sürümü: otomatik güncelleme yeni yayını buna göre anlar (/api/surum ile aynı biçim)
   env: { NEXT_PUBLIC_SURUM: (process.env.VERCEL_GIT_COMMIT_SHA || "yerel").slice(0, 12) },

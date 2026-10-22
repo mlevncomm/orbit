@@ -1,0 +1,10 @@
+{
+  "regions": ["fra1"],
+  "buildCommand": "node ../scripts/build-web.js && node scripts/vercel-db.js && prisma generate && next build",
+  "crons": [
+    {
+      "path": "/api/outreach/tick",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
